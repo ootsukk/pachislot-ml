@@ -1,0 +1,97 @@
+# ==========================================
+# VSCode (Visual Studio Code)
+# ==========================================
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# ==========================================
+# Python 仮想環境 (Virtual Environments)
+# ==========================================
+.venv/
+venv/
+ENV/
+env/
+.venv
+.pytest_cache/
+
+# ==========================================
+# Python キャッシュ・コンパイルファイル
+# ==========================================
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ==========================================
+# 環境変数・機密情報 (Secrets / Environment Variables)
+# ==========================================
+.env
+.env.local
+.env.*.local
+*.secret
+*.pem
+
+# ==========================================
+# ログファイル
+# ==========================================
+*.log
+pip-log.txt
+
+# ==========================================
+# OS特有の不要ファイル
+# ==========================================
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.lnk
+*.cab
+*.msi
+*.msm
+*.msp
+*.lnk
+Desktop.ini
+$RECYCLE.BIN/
+
+# ==========================================
+# uv
+# ==========================================
+.uv/
+
+# ==========================================
+# Hatch
+# ==========================================
+.hatch/
+dist/
+build/
+*.egg-info/
+
+# ==========================================
+# Testing / Jupyter Notebooks / Cache
+# ==========================================
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/

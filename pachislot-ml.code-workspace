@@ -1,0 +1,36 @@
+{
+  "folders": [
+    {
+      "name": "WORKSPACE_ROOT",
+      "path": "."
+    },
+    {
+      "name": "00_Common",
+      "path": "common"
+    },
+    {
+      "name": "01_Data_Pipeline",
+      "path": "data-pipeline"
+    },
+    {
+      "name": "02_ML_Models",
+      "path": "ml-models"
+    },
+    {
+      "name": "03_Web_App",
+      "path": "web-app"
+    }
+  ],
+  "settings": {
+      "python.defaultInterpreterPath": "${workspaceFolder:WORKSPACE_ROOT}/.venv/Scripts/python.exe",
+
+      "files.exclude": {
+      "**/.git": true,
+      "**/.DS_Store": true,
+      "**/__pycache__": true,
+      "**/*.pyc": true,
+      "**/.venv": true,
+      "**/*.egg-info": true
+    }
+  }
+}

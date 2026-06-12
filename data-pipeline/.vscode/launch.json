@@ -1,0 +1,13 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python デバッガー: ${workspaceFolderBasename:01_Data_Pipeline}",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder:01_Data_Pipeline}"
+        }
+    ]
+}

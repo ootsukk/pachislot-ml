@@ -1,0 +1,32 @@
+{
+  "python.analysis.importFormat": "absolute",
+  "python.analysis.autoImportCompletions": true,
+
+  "editor.defaultFormatter": "charliermarsh.ruff",
+  "editor.formatOnSave": true,
+  "python.terminal.activateEnvironment": false,
+  "python.terminal.activateEnvInCurrentTerminal": false,
+
+  "python.testing.pytestEnabled": true,
+  "python.testing.pytestArgs": [
+    "common",
+    "data-pipeline",
+    "ml-models",
+    "web-app"
+  ],
+
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/.venv/**": true,
+    "**/build/**": true,
+    "**/dist/**": true
+  },
+
+  "files.exclude": {
+    "common/": true,
+    "data-pipeline/": true,
+    "web-app/": true,
+    "ml-models/": true,
+  },
+}

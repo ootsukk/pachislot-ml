@@ -1,0 +1,42 @@
+[project]
+name = "PachSlot-ML"
+version = "0.1.0"
+description = ""
+requires-python = "==3.14.*"
+dependencies = []
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
+extraPaths = [
+    "common/src",
+    "data-pipeline/src",
+    "ml-models/src",
+    "web-app/src"
+]
+
+pythonVersion = "3.14"
+typeCheckingMode = "standard"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle (Error / Warning)
+    "F",        # Pyflakes
+    "I",        # isort (Import coordination)
+    "UP",       # pyupgrade (Forcing modern Python 3.14 constructs)
+    "B",        # flake8-bugbear (Catches subtle design flaws and runtime bugs)
+    "SIM",      # flake8-simplify (Structural flattening / streamlining)
+    "C4",       # flake8-comprehensions (Optimized lookup literals)
+    "N",        # pep8-naming (Case style conformity)
+    "ASYNC",    # flake8-async (Validating concurrency boundaries)
+ ]
+ignore = [
+    "E501",     # Line too long (Delegated to ruff format automatically)
+]
+
+[tool.uv]
+workspace = { members = ["common", "data-pipeline", "ml-models", "web-app"] }
