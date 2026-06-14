@@ -65,6 +65,10 @@ class CurlCffiClientHttpResponse:
         async for line in cast(AsyncIterator[bytes], self._response.iter_lines()):
             yield line.decode(CHARSET_UTF8, errors="replace")
 
+    async def stream_chunks(self, chunk_size: int = 4096) -> AsyncIterator[bytes]:
+        async for chunk in cast(AsyncIterator[bytes], self._response.iter_content(chunk_size)):
+            yield chunk
+
     async def close(self) -> None:
         pass
 

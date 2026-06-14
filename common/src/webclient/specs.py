@@ -12,7 +12,7 @@ from webclient.errors import WebClientResponseError
 from webclient.types import CHARSET_UTF8, CONTENT_TYPE, MediaType
 
 
-class ClientResponse:
+class ResponseSpec:
 
     def __init__(self, response: ClientHttpResponse, decoder: BodyDecoder) -> None:
         self._response: ClientHttpResponse = response
@@ -39,15 +39,20 @@ class ClientResponse:
         return self._response.headers
 
     async def read_body(self) -> bytes:
+        """全データを生のバイト配列（bytes）として一括取得します。"""
         if self._is_closed:
             raise RuntimeError("クローズされたレスポンスからボディを読み取ることはできません。")
         return await self._response.read_body()
 
     async def value[T](self, element_type: type[T], /) -> T:
+        """全データをメモリに一括ロードし、指定された型（dataclassやdictなど）に全自動でデコードして返します。"""
+        if self._is_closed:
+            raise RuntimeError("クローズされたレスポンスからデータを読み取ることはできません。")
         body_bytes = await self._response.read_body()
         return self._decoder.decode(body_bytes, element_type)
 
     def stream[T](self, element_type: type[T], /) -> AsyncIterator[T]:
+        """テキストデータを1行ずつストリーミング読み込みし、指定された型に逐次デコードして流す非同期ジェネレータを返します。"""
         if self._is_closed:
             raise RuntimeError("クローズされたレスポンスからストリームを開始することはできません。")
 
@@ -57,7 +62,19 @@ class ClientResponse:
 
         return _gen()
 
+    def stream_chunks(self, chunk_size: int = 4096) -> AsyncIterator[bytes]:
+        """大容量バイナリデータ（ZIPや動画等）をメモリを枯渇させないように一定サイズ（チャンク）ごとに切り出して流す非同期ジェネレータを返します。"""
+        if self._is_closed:
+            raise RuntimeError("クローズされたレスポンスからストリームを開始することはできません。")
+
+        async def _gen() -> AsyncIterator[bytes]:
+            async for chunk in self._response.stream_chunks(chunk_size):
+                yield chunk
+
+        return _gen()
+
     async def close(self) -> None:
+        """下位の通信レスポンスを安全にクローズし、リソースを解放します。このメソッドは何度呼び出しても安全です。"""
         if not self._is_closed:
             await self._response.close()
             self._is_closed = True
@@ -90,7 +107,7 @@ class RequestHeadersSpec:
         self._data: Mapping[str, object] | None = None
         self._json_body: object | None = None
         self._files: Mapping[str, object] | None = None
-        self._status_handlers: list[tuple[Callable[[int], bool], Callable[[ClientResponse], Coroutine[object, object, Exception]]]] = []
+        self._status_handlers: list[tuple[Callable[[int], bool], Callable[[ResponseSpec], Coroutine[object, object, Exception]]]] = []
 
     def header(self, name: str, value: str, /) -> Self:
         self._headers[name] = value
@@ -123,7 +140,7 @@ class RequestHeadersSpec:
     def on_status(
         self,
         predicate: Callable[[int], bool],
-        handler: Callable[[ClientResponse], Coroutine[object, object, Exception]],
+        handler: Callable[[ResponseSpec], Coroutine[object, object, Exception]],
         /
     ) -> Self:
         self._status_handlers.append((predicate, handler))
@@ -149,7 +166,7 @@ class RequestHeadersSpec:
         return request.auth.apply(request) if request.auth is not None else request
 
     async def _check_status_and_raise(self, raw_response: ClientHttpResponse) -> None:
-        client_response = ClientResponse(raw_response, self._decoder)
+        client_response = ResponseSpec(raw_response, self._decoder)
 
         for predicate, handler in self._status_handlers:
             if predicate(raw_response.status_code):
@@ -193,12 +210,12 @@ class RequestHeadersSpec:
 
     async def exchange_to_value[T](
         self,
-        handler: Callable[[ClientResponse], Coroutine[object, object, T]],
+        handler: Callable[[ResponseSpec], Coroutine[object, object, T]],
         /
     ) -> T:
         final_request = self._apply_auth(self._build_request())
         raw_response = await self._exchange_function.exchange(final_request, stream=False)
-        client_response = ClientResponse(raw_response, self._decoder)
+        client_response = ResponseSpec(raw_response, self._decoder)
         try:
             return await handler(client_response)
         finally:
@@ -206,7 +223,7 @@ class RequestHeadersSpec:
 
     def exchange_to_stream[T](
         self,
-        handler: Callable[[ClientResponse], AsyncIterator[T]],
+        handler: Callable[[ResponseSpec], AsyncIterator[T]],
         /
     ) -> AsyncIterator[T]:
         request = self._build_request()
@@ -214,7 +231,7 @@ class RequestHeadersSpec:
         async def _stream_generator() -> AsyncIterator[T]:
             final_request = self._apply_auth(request)
             raw_response = await self._exchange_function.exchange(final_request, stream=True)
-            client_response = ClientResponse(raw_response, self._decoder)
+            client_response = ResponseSpec(raw_response, self._decoder)
             try:
                 async for element in handler(client_response):
                     yield element

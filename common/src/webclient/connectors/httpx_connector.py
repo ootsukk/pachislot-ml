@@ -52,6 +52,9 @@ class HttpxClientHttpResponse:
         async for line in self._response.aiter_lines():
             yield line
 
+    def stream_chunks(self, chunk_size: int = 4096) -> AsyncIterator[bytes]:
+        return self._response.aiter_bytes(chunk_size=chunk_size)
+
     async def close(self) -> None:
         await self._response.aclose()
 
