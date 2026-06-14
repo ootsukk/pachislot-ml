@@ -19,6 +19,7 @@ from webclient.base import (
     FilteredExchangeFunction,
     HttpMethod,
     ProxyOptions,
+    RedirectOptions,
 )
 from webclient.codec import BodyDecoder, BodyEncoder, DefaultBodyDecoder, DefaultBodyEncoder
 from webclient.config import WebClientConfig
@@ -398,6 +399,20 @@ class DefaultWebClientBuilder:
                     source_input = config_class(**{k: v for k, v in source_input.items() if not k.startswith("_")})
 
                 conn_config = connector_class.create_config(source_input, type_pool=type_pool)
+
+                type_pool[RedirectOptions] = self._config.redirect
+
+                sig = inspect.signature(connector_class)
+                kwargs: dict[str, Any] = {}
+                for param_name, param in sig.parameters.items():
+                    if param_name in ("self", "cls"):
+                        continue
+                    p_type = param.annotation
+                    if p_type in type_pool:
+                        kwargs[param_name] = type_pool[p_type]
+                    elif p_type is type(conn_config):
+                        kwargs[param_name] = conn_config
+
                 dynamic_cls = cast(Any, connector_class)
                 try:
                     return cast(ClientHttpConnector, dynamic_cls(conn_config, proxy_options=type_pool.get(ProxyOptions)))

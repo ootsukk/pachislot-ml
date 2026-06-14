@@ -51,6 +51,13 @@ class ProxyOptions:
     no_proxy: str | None = None
 
 @dataclass(frozen=True)
+class RedirectOptions:
+    """すべての通信コネクターで一貫して適用される、自動リダイレクト制御の共通構成データ構造"""
+
+    follow_redirects: bool = True
+    max_redirects: int = 20
+
+@dataclass(frozen=True)
 class ClientHttpRequest:
     """不変（Immutable）なHTTPリクエストデータコンテナ"""
     method: HttpMethod | str

@@ -13,6 +13,7 @@ from webclient.base import (
     Configurable,
     ConnectorConfig,
     ProxyOptions,
+    RedirectOptions,
 )
 from webclient.utility import Named
 
@@ -65,10 +66,16 @@ class HttpxClientHttpConnector(ClientHttpConnector, Configurable[HttpxConnectorO
     コアのコンポーネントスキャンによって全自動で検知・マウントされます。
     """
 
-    def __init__(self, config: HttpxConnectorOptions | None = None, proxy_options: ProxyOptions | None = None) -> None:
+    def __init__(
+        self,
+        config: HttpxConnectorOptions | None = None,
+        proxy_options: ProxyOptions | None = None,
+        redirect_options: RedirectOptions | None = None,
+    ) -> None:
 
         self.config = config if config is not None else HttpxConnectorOptions()
-        self.proxy_options = proxy_options
+        self.proxy_options = proxy_options if proxy_options is not None else ProxyOptions()
+        self.redirect_options = redirect_options if redirect_options is not None else RedirectOptions()
 
         # 直接通信とプロキシ通信の双方で共有するトランスポートのベース設定を束ねる
         transport_kwargs = {
@@ -124,8 +131,13 @@ class HttpxClientHttpConnector(ClientHttpConnector, Configurable[HttpxConnectorO
         # メイントランスポートとして direct_transport を指定し、
         # プロキシやバイパスのルーティングルールを mounts 引数へ完全委譲します。
         self._client = httpx.AsyncClient(
-            transport=direct_transport, trust_env=self.config.trust_env, mounts=httpx_mounts if httpx_mounts else None
+            transport=direct_transport,
+            trust_env=self.config.trust_env,
+            mounts=httpx_mounts if httpx_mounts else None,
+            follow_redirects=self.redirect_options.follow_redirects
         )
+        # HTTPXの仕様に従い、最大リダイレクト回数はインスタンス生成後に内部値を上書き調律
+        self._client.max_redirects = self.redirect_options.max_redirects
 
 
     async def connect(self, request: ClientHttpRequest, *, stream: bool = False) -> ClientHttpResponse:

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
-from webclient.base import ConnectorConfig, FilterConfig, ProxyOptions
+from webclient.base import ConnectorConfig, FilterConfig, ProxyOptions, RedirectOptions
 from webclient.types import CHARSET_UTF8
 from webclient.utility import discover_config_classes
 
@@ -23,6 +23,7 @@ class WebClientConfig:
     default_headers: Mapping[str, str] = field(default_factory=dict)
     default_cookies: Mapping[str, str] = field(default_factory=dict)
     proxy: ProxyOptions | None = None
+    redirect: RedirectOptions = field(default_factory=RedirectOptions)
     filters: Mapping[str, FilterConfig] = field(default_factory=dict)
     cookie_store: str = "memory"
     encoder: str = "default"

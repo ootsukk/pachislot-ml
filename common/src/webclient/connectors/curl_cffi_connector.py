@@ -24,6 +24,7 @@ from webclient.base import (
     Configurable,
     ConnectorConfig,
     ProxyOptions,
+    RedirectOptions,
 )
 from webclient.utility import Named
 
@@ -83,6 +84,7 @@ class CurlCffiClientHttpConnector(ClientHttpConnector, Configurable[CurlCffiConn
         self,
         config: CurlCffiConnectorOptions | None = None,
         proxy_options: ProxyOptions | None = None,
+        redirect_options: RedirectOptions | None = None,
     ) -> None:
         if not _HAS_CURL_CFFI:
             raise ImportError(
@@ -93,7 +95,8 @@ class CurlCffiClientHttpConnector(ClientHttpConnector, Configurable[CurlCffiConn
         from curl_cffi import requests
 
         self.config = config if config is not None else CurlCffiConnectorOptions()
-        self.proxy_options = proxy_options
+        self.proxy_options = proxy_options if proxy_options is not None else ProxyOptions()
+        self.redirect_options = redirect_options if redirect_options is not None else RedirectOptions()
 
         curl_proxies: dict[str, str] = {}
 
@@ -136,6 +139,8 @@ class CurlCffiClientHttpConnector(ClientHttpConnector, Configurable[CurlCffiConn
             "cookies": request.cookies,
             "timeout": timeout,
             "stream": stream,
+            "allow_redirects": self.redirect_options.follow_redirects,
+            "max_redirects": self.redirect_options.max_redirects,
         }
 
         if request.json_body is not None:
