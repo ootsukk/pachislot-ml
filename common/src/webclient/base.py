@@ -31,6 +31,16 @@ class FilterConfig:
 # =====================================================================
 
 @dataclass(frozen=True)
+class MultipartPart:
+    """マルチパートリクエストを構成する、個々の独立したパート（要素）を表す不変データコンテナ"""
+
+    name: str
+    value: bytes | str
+    filename: str | None = None
+    content_type: str | None = None
+    headers: Mapping[str, str] = field(default_factory=dict)
+
+@dataclass(frozen=True)
 class ProxyOptions:
     """すべての通信コネクターで共有される、ネットワークプロキシの共通構成データ構造"""
 
@@ -54,6 +64,7 @@ class ClientHttpRequest:
     data: Mapping[str, object] | None = None
     json_body: object | None = None
     files: Mapping[str, object] | None = None
+    multipart_body: Sequence[MultipartPart] | None = None
     attributes: Mapping[str, object] = field(default_factory=dict)
 
 

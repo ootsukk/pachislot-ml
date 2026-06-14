@@ -3,16 +3,22 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable, Coroutine, Generator, Mapping, Sequence
 from dataclasses import is_dataclass
 from types import TracebackType
-from typing import Self
+from typing import Any, Self
 
 from webclient.auth import ClientHttpAuth
-from webclient.base import ClientHttpRequest, ClientHttpResponse, ExchangeFunction, HttpMethod
+from webclient.base import ClientHttpRequest, ClientHttpResponse, ExchangeFunction, MultipartPart
 from webclient.codec import BodyDecoder, BodyEncoder
 from webclient.errors import WebClientResponseError
-from webclient.types import CHARSET_UTF8, CONTENT_TYPE, MediaType
+from webclient.multipart import MultipartBodyBuilder
+from webclient.types import CHARSET_UTF8, CONTENT_TYPE, HttpMethod, MediaType
 
 
 class ResponseSpec:
+    """レスポンスデータを安全に管理・抽出するための流れるような(Fluent)レスポンス表現スペック。
+
+    非同期コンテキストマネージャに対応しており、async with ブロックを抜ける際に
+    下位の通信コネクションやリソースを全自動で確実に解放（リークを物理遮断）します。
+    """
 
     def __init__(self, response: ClientHttpResponse, decoder: BodyDecoder) -> None:
         self._response: ClientHttpResponse = response
@@ -74,68 +80,110 @@ class ResponseSpec:
         return _gen()
 
     async def close(self) -> None:
-        """下位の通信レスポンスを安全にクローズし、リソースを解放します。このメソッドは何度呼び出しても安全です。"""
+        """下位の通信レスポンスを安全にクローズし、リソースを解放します。このメソッドは何度呼び出しても安全です（べき等性担保）。"""
         if not self._is_closed:
             await self._response.close()
             self._is_closed = True
 
+
 class RequestHeadersSpec:
+    """ヘッダーの個別追加、各種メタ情報の付与、および通信実行へと繋ぐ完全不変スペック境界。"""
 
     def __init__(
         self,
         exchange_function: ExchangeFunction,
         encoder: BodyEncoder,
         decoder: BodyDecoder,
-        method: HttpMethod,
+        method: HttpMethod | str,
         url: str,
         default_headers: Mapping[str, str],
         default_cookies: Mapping[str, str],
         default_timeout: float | object | None,
+        *,
+        params: Mapping[str, str | Sequence[str]] | None = None,
+        auth: ClientHttpAuth | None = None,
+        attributes: Mapping[str, object] | None = None,
+        content: bytes | None = None,
+        json_body: object | None = None,
+        data: Mapping[str, object] | None = None,
+        files: Mapping[str, object] | None = None,
+        multipart_body: Sequence[MultipartPart] | None = None,
+        status_handlers: list[tuple[Callable[[int], bool], Callable[[ResponseSpec], Coroutine[object, object, Exception]]]] | None = None,
     ) -> None:
-        self._exchange_function: ExchangeFunction = exchange_function
-        self._encoder: BodyEncoder = encoder
-        self._decoder: BodyDecoder = decoder
-        self._method: HttpMethod = method
-        self._url: str = url
+        self._exchange_function = exchange_function
+        self._encoder = encoder
+        self._decoder = decoder
+        self._method = method
+        self._url = url
         self._headers: dict[str, str] = dict(default_headers)
-        self._params: Mapping[str, str | Sequence[str]] | None = None
         self._cookies: dict[str, str] = dict(default_cookies)
-        self._auth: ClientHttpAuth | None = None
-        self._timeout: float | object | None = default_timeout
-        self._attributes: dict[str, object] = {}
-        self._content: bytes | None = None
-        self._data: Mapping[str, object] | None = None
-        self._json_body: object | None = None
-        self._files: Mapping[str, object] | None = None
-        self._status_handlers: list[tuple[Callable[[int], bool], Callable[[ResponseSpec], Coroutine[object, object, Exception]]]] = []
+        self._timeout = default_timeout
+
+        self._params = params
+        self._auth = auth
+        self._attributes = dict(attributes) if attributes else {}
+        self._content = content
+        self._json_body = json_body
+        self._data = data
+        self._files = files
+        self._multipart_body = multipart_body
+        self._status_handlers = list(status_handlers) if status_handlers else []
+
+    def _clone(self, **updates: Any) -> Self:
+        """自身の構成パラメータを引き継ぎつつ、指定された属性のみをオーバーライドした
+        全く新しい同型スペックオブジェクト（不変スナップショット）を新造して返します。
+        """
+        kwargs = {
+            "exchange_function": self._exchange_function,
+            "encoder": self._encoder,
+            "decoder": self._decoder,
+            "method": self._method,
+            "url": self._url,
+            "default_headers": self._headers,
+            "default_cookies": self._cookies,
+            "default_timeout": self._timeout,
+            "params": self._params,
+            "auth": self._auth,
+            "attributes": self._attributes,
+            "content": self._content,
+            "json_body": self._json_body,
+            "data": self._data,
+            "files": self._files,
+            "multipart_body": self._multipart_body,
+            "status_handlers": self._status_handlers,
+        }
+        kwargs.update(updates)
+
+        return self.__class__(**kwargs)
 
     def header(self, name: str, value: str, /) -> Self:
-        self._headers[name] = value
-        return self
+        new_headers = dict(self._headers)
+        new_headers[name] = value
+        return self._clone(default_headers=new_headers)
 
     def accept(self, media_type: MediaType | str, /) -> Self:
-        self._headers["Accept"] = media_type
-        return self
+        new_headers = dict(self._headers)
+        new_headers["Accept"] = str(media_type)
+        return self._clone(default_headers=new_headers)
 
     def params_map(self, params: Mapping[str, str | Sequence[str]], /) -> Self:
-        self._params = params
-        return self
+        return self._clone(params=params)
 
     def cookies_map(self, cookies: Mapping[str, str], /) -> Self:
-        self._cookies.update(cookies)
-        return self
+        new_cookies = dict(self._cookies)
+        new_cookies.update(cookies)
+        return self._clone(default_cookies=new_cookies)
 
     def auth_info(self, auth: ClientHttpAuth, /) -> Self:
-        self._auth = auth
-        return self
+        return self._clone(auth=auth)
 
     def timeout_value(self, timeout: float | object, /) -> Self:
-        self._timeout = timeout
-        return self
+        return self._clone(default_timeout=timeout)
 
     def attribute(self, key: str, value: object, /) -> Self:
-        self._attributes[key] = value
-        return self
+        new_attrs = dict(self._attributes)
+        new_attrs[key] = value
+        return self._clone(attributes=new_attrs)
 
     def on_status(
         self,
@@ -143,8 +191,10 @@ class RequestHeadersSpec:
         handler: Callable[[ResponseSpec], Coroutine[object, object, Exception]],
         /
     ) -> Self:
-        self._status_handlers.append((predicate, handler))
-        return self
+        new_handlers = list(self._status_handlers)
+        new_handlers.append((predicate, handler))
+        return self._clone(status_handlers=new_handlers)
+
 
     def _build_request(self) -> ClientHttpRequest:
         return ClientHttpRequest(
@@ -159,6 +209,7 @@ class RequestHeadersSpec:
             data=self._data,
             json_body=self._json_body,
             files=self._files,
+            multipart_body=self._multipart_body,
             attributes=self._attributes,
         )
 
@@ -208,6 +259,24 @@ class RequestHeadersSpec:
 
         return _stream_generator()
 
+    def stream_chunks(self, chunk_size: int = 4096) -> AsyncIterator[bytes]:
+        """大容量バイナリ（ZIPやPDF等）をメモリを汚さずに一定サイズ（チャンク）ごとに切り出して
+        流し込む、完全自律クローズ型のストリーミングゲートウェイを返却します。
+        """
+        request = self._build_request()
+
+        async def _chunk_generator() -> AsyncIterator[bytes]:
+            final_request = self._apply_auth(request)
+            response = await self._exchange_function.exchange(final_request, stream=True)
+            try:
+                await self._check_status_and_raise(response)
+                async for chunk in response.stream_chunks(chunk_size):
+                    yield chunk
+            finally:
+                await response.close()
+
+        return _chunk_generator()
+
     async def exchange_to_value[T](
         self,
         handler: Callable[[ResponseSpec], Coroutine[object, object, T]],
@@ -245,37 +314,46 @@ class RequestHeadersSpec:
 
 
 class RequestBodySpec(RequestHeadersSpec):
+    """ボディ（JSON、Form、Multipart）のインジェクション能力を拡張した上位スペック境界。"""
 
     def body_value(self, body: object, /) -> RequestHeadersSpec:
+        new_headers = dict(self._headers)
+
         if isinstance(body, bytes):
-            self._content = body
+            return self._clone(content=body)
         elif isinstance(body, str):
-            self._content = body.encode(CHARSET_UTF8)
+            return self._clone(content=body.encode(CHARSET_UTF8))
         elif is_dataclass(body):
-            self._json_body = self._encoder.encode(body)
-            self._headers.setdefault(CONTENT_TYPE, MediaType.JSON)
+            new_headers.setdefault(CONTENT_TYPE, MediaType.JSON)
+            return self._clone(json_body=self._encoder.encode(body), default_headers=new_headers)
         else:
-            self._json_body = body
-            self._headers.setdefault(CONTENT_TYPE, MediaType.JSON)
-        return self
+            new_headers.setdefault(CONTENT_TYPE, MediaType.JSON)
+            return self._clone(json_body=body, default_headers=new_headers)
 
     def body_json(self, json_data: object, /) -> RequestHeadersSpec:
-        self._json_body = self._encoder.encode(json_data)
-        self._headers.setdefault(CONTENT_TYPE, MediaType.JSON)
-        return self
+        new_headers = dict(self._headers)
+        new_headers.setdefault(CONTENT_TYPE, MediaType.JSON)
+        return self._clone(json_body=self._encoder.encode(json_data), default_headers=new_headers)
 
     def body_form(self, form_data: Mapping[str, object], /) -> RequestHeadersSpec:
-        self._data = form_data
-        self._headers.setdefault(CONTENT_TYPE, MediaType.FORM_URLENCODED)
-        return self
+        new_headers = dict(self._headers)
+        new_headers.setdefault(CONTENT_TYPE, MediaType.FORM_URLENCODED)
+        return self._clone(data=form_data, default_headers=new_headers)
 
     def body_files(self, files: Mapping[str, object], /) -> RequestHeadersSpec:
-        self._files = files
-        self._headers.setdefault(CONTENT_TYPE, MediaType.MULTIPART_FORM_DATA)
-        return self
+        new_headers = dict(self._headers)
+        new_headers.setdefault(CONTENT_TYPE, MediaType.MULTIPART_FORM_DATA)
+        return self._clone(files=files, default_headers=new_headers)
+
+    def body_multipart(self, builder: MultipartBodyBuilder, /) -> RequestHeadersSpec:
+        new_headers = dict(self._headers)
+        new_headers.setdefault(CONTENT_TYPE, MediaType.MULTIPART_FORM_DATA)
+        return self._clone(multipart_body=builder.build(), default_headers=new_headers)
 
 
 class RequestHeadersUriSpec:
+    """リクエストのURIテンプレート解決および初期設定のスペック境界。"""
+
     def __init__(self, exchange_function: ExchangeFunction, encoder: BodyEncoder, decoder: BodyDecoder, method: HttpMethod, api_version: str, default_headers: Mapping[str, str], default_cookies: Mapping[str, str], default_timeout: float | object | None) -> None:
         self._exchange_function = exchange_function
         self._encoder = encoder
@@ -307,6 +385,8 @@ class RequestHeadersUriSpec:
 
 
 class RequestBodyUriSpec:
+    """ボディ積載が許可されたメソッド（POST, PUT等）専用のURIテンプレート解決スペック境界。"""
+
     def __init__(self, exchange_function: ExchangeFunction, encoder: BodyEncoder, decoder: BodyDecoder, method: HttpMethod, api_version: str, default_headers: Mapping[str, str], default_cookies: Mapping[str, str], default_timeout: float | object | None) -> None:
         self._exchange_function = exchange_function
         self._encoder = encoder

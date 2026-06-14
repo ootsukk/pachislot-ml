@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse, urlunparse
 
-from webclient.types import CHARSET_UTF8
+from webclient.types import CHARSET_UTF8, MediaType
 
 if TYPE_CHECKING:
     from curl_cffi import requests
@@ -145,8 +145,35 @@ class CurlCffiClientHttpConnector(ClientHttpConnector, Configurable[CurlCffiConn
         elif request.content is not None:
             kwargs["data"] = request.content
 
+        if request.multipart_body:
+            curl_data: dict[str, Any] = {}
+            curl_files: dict[str, Any] = {}
+
+            for part in request.multipart_body:
+                if part.filename is None and part.content_type is None:
+                    # 通常のテキストフォーム値
+                    curl_data[part.name] = part.value
+                else:
+                    # requests互換のファイル表現構造（3要素タプル）へ翻訳
+                    # 構造: (ファイル名, コンテンツ, Content-Type)
+                    # 注: ユーザーがテキスト（str）を渡した場合、requests互換層で
+                    # 自動エンコードされますが、バイナリの安全性のためにキャストを透過させます。
+                    curl_files[part.name] = (
+                        part.filename or "",  # 空文字にフォールバックしてファイルパート化を強制
+                        part.value,
+                        part.content_type or MediaType.OCTET_STREAM,
+                    )
+
+            if curl_data:
+                kwargs["data"] = curl_data
+            if curl_files:
+                kwargs["files"] = curl_files
+
         if request.files is not None:
-            kwargs["files"] = request.files
+            # 手動での生指定がある場合のマージ（互換性維持）
+            existing_files = kwargs.get("files", {})
+            existing_files.update(request.files)
+            kwargs["files"] = existing_files
 
         curl_res = await self._session.request(**kwargs)
         return CurlCffiClientHttpResponse(curl_res)

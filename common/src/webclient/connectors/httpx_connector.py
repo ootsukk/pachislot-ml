@@ -149,8 +149,34 @@ class HttpxClientHttpConnector(ClientHttpConnector, Configurable[HttpxConnectorO
         elif request.content is not None:
             kwargs["content"] = request.content
 
-        if request.files is not None:
-            kwargs["files"] = request.files
+        if request.multipart_body:
+            httpx_data: dict[str, Any] = {}
+            httpx_files: dict[str, Any] = {}
+
+            for part in request.multipart_body:
+                # ファイル名がなく、かつ個別のメディアタイプ（Content-Type）も指定されていない純粋なテキストパート
+                if part.filename is None and part.content_type is None and not part.headers:
+                    # HTTPXの標準dataフォームフィールドとして積載
+                    httpx_data[part.name] = part.value
+                else:
+                    # 個別ヘッダーの辞書組み立て（Content-Typeの自動マージ）
+                    part_headers = dict(part.headers)
+                    if part.content_type and "Content-Type" not in part_headers:
+                        part_headers["Content-Type"] = part.content_type
+
+                    # HTTPXが要求する高度なファイルマルチパート用の4要素タプル構造へ翻訳
+                    # 構造: (ファイル名, コンテンツ, Content-Type, 個別ヘッダー)
+                    httpx_files[part.name] = (
+                        part.filename,  # Noneであっても透過バインド可能
+                        part.value,
+                        part.content_type,
+                        part_headers if part_headers else None
+                    )
+
+            if httpx_data:
+                kwargs["data"] = httpx_data
+            if httpx_files:
+                kwargs["files"] = httpx_files
 
         httpx_req = self._client.build_request(**kwargs)
 
