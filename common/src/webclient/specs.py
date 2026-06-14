@@ -6,10 +6,10 @@ from types import TracebackType
 from typing import Self
 
 from webclient.auth import ClientHttpAuth
+from webclient.base import ClientHttpRequest, ClientHttpResponse, ExchangeFunction, HttpMethod
 from webclient.codec import BodyDecoder, BodyEncoder
 from webclient.errors import WebClientResponseError
-from webclient.filter import ExchangeFunction
-from webclient.types import ClientHttpRequest, ClientHttpResponse, HttpMethod
+from webclient.types import CHARSET_UTF8, CONTENT_TYPE, MediaType
 
 
 class ClientResponse:
@@ -96,7 +96,7 @@ class RequestHeadersSpec:
         self._headers[name] = value
         return self
 
-    def accept(self, media_type: str, /) -> Self:
+    def accept(self, media_type: MediaType | str, /) -> Self:
         self._headers["Accept"] = media_type
         return self
 
@@ -233,27 +233,28 @@ class RequestBodySpec(RequestHeadersSpec):
         if isinstance(body, bytes):
             self._content = body
         elif isinstance(body, str):
-            self._content = body.encode("utf-8")
+            self._content = body.encode(CHARSET_UTF8)
         elif is_dataclass(body):
             self._json_body = self._encoder.encode(body)
-            self._headers.setdefault("Content-Type", "application/json")
+            self._headers.setdefault(CONTENT_TYPE, MediaType.JSON)
         else:
             self._json_body = body
-            self._headers.setdefault("Content-Type", "application/json")
+            self._headers.setdefault(CONTENT_TYPE, MediaType.JSON)
         return self
 
     def body_json(self, json_data: object, /) -> RequestHeadersSpec:
         self._json_body = self._encoder.encode(json_data)
-        self._headers.setdefault("Content-Type", "application/json")
+        self._headers.setdefault(CONTENT_TYPE, MediaType.JSON)
         return self
 
     def body_form(self, form_data: Mapping[str, object], /) -> RequestHeadersSpec:
         self._data = form_data
-        self._headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
+        self._headers.setdefault(CONTENT_TYPE, MediaType.FORM_URLENCODED)
         return self
 
     def body_files(self, files: Mapping[str, object], /) -> RequestHeadersSpec:
         self._files = files
+        self._headers.setdefault(CONTENT_TYPE, MediaType.MULTIPART_FORM_DATA)
         return self
 
 

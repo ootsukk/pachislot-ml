@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from urllib.parse import urlparse
 
-from webclient.types import CookieStore
+from webclient.base import CookieStore
 
 
 class MemoryCookieStore(CookieStore):

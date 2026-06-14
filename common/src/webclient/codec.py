@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from typing import cast
 
+from webclient.types import CHARSET_UTF8
+
 
 class BodyEncoder(ABC):
     # オブジェクトをHTTPリクエストで送信可能な形式に変換する抽象エンコーダー
@@ -40,11 +42,11 @@ class BodyDecoder(ABC):
 class DefaultBodyDecoder(BodyDecoder):
 
     def decode[T](self, data: bytes | str, element_type: type[T], /) -> T:
-        raw_bytes = data if isinstance(data, bytes) else data.encode("utf-8")
+        raw_bytes = data if isinstance(data, bytes) else data.encode(CHARSET_UTF8)
         if element_type is bytes:
             return cast(T, raw_bytes)
 
-        decoded_str = raw_bytes.decode("utf-8")
+        decoded_str = raw_bytes.decode(CHARSET_UTF8)
         if element_type is str:
             return cast(T, decoded_str)
 

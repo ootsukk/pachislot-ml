@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from webclient.types import ClientHttpAuth
+from webclient.base import ClientHttpAuth
 
 if TYPE_CHECKING:
-    from webclient.types import ClientHttpRequest
+    from webclient.base import ClientHttpRequest
 
 
 class BearerAuth(ClientHttpAuth):

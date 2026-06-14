@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Mapping, Sequence
-from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Final
 
+CONTENT_TYPE: Final[str] = "Content-Type"
+CHARSET_UTF8: Final[str] = "utf-8"
 
 class HttpMethod(StrEnum):
+
     GET = "GET"
     POST = "POST"
     PUT = "PUT"
@@ -15,68 +16,43 @@ class HttpMethod(StrEnum):
     HEAD = "HEAD"
     OPTIONS = "OPTIONS"
 
+class MediaType(StrEnum):
 
-@dataclass(frozen=True)
-class ClientHttpRequest:
-    method: HttpMethod
-    url: str
-    headers: Mapping[str, str] = field(default_factory=dict)
-    params: Mapping[str, str | Sequence[str]] | None = None
-    cookies: Mapping[str, str] | None = None
-    auth: ClientHttpAuth | None = None
-    timeout: float | object | None = None
-    content: bytes | None = None
-    data: Mapping[str, object] | None = None
-    json_body: object | None = None
-    files: Mapping[str, object] | None = None
-    attributes: Mapping[str, object] = field(default_factory=dict)
+    # Application系
+    JSON = "application/json"
+    XML = "application/xml"
+    PDF = "application/pdf"
+    ZIP = "application/zip"
+    OCTET_STREAM = "application/octet-stream"
 
+    # Form / Multipart系
+    FORM_URLENCODED = "application/x-www-form-urlencoded"
+    MULTIPART_FORM_DATA = "multipart/form-data"
 
-class ClientHttpResponse(ABC):
+    # Text系
+    TEXT_PLAIN = "text/plain"
+    TEXT_HTML = "text/html"
+    TEXT_CSS = "text/css"
+    TEXT_JAVASCRIPT = "text/javascript"
+    TEXT_EVENT_STREAM = "text/event-stream"
 
-    @abstractmethod
-    async def read_body(self) -> bytes: ...
+    # Image系
+    JPEG = "image/jpeg"
+    PNG = "image/png"
+    GIF = "image/gif"
+    WEBP = "image/webp"
+    SVG = "image/svg+xml"
 
-    @abstractmethod
-    def stream_lines(self) -> AsyncIterator[str]: ...
+    def with_charset(self, charset: str = CHARSET_UTF8) -> str:
+        """メディアタイプに文字コード属性（charset）を結合した文字列を返します。
 
-    @property
-    @abstractmethod
-    def status_code(self) -> int: ...
+        使用例: MediaType.JSON.with_charset() -> "application/json; charset=utf-8"
+        """
+        return f"{self.value}; charset={charset}"
 
-    @property
-    @abstractmethod
-    def headers(self) -> Mapping[str, str]: ...
+    def with_parameter(self, name: str, value: str) -> str:
+        """メディアタイプに任意の追加パラメータを結合した文字列を返します。
 
-    @abstractmethod
-    async def close(self) -> None: ...
-
-
-class ClientHttpConnector(ABC):
-    # HTTPクライアントエンジンを抽象化する基底クラス
-
-    @abstractmethod
-    async def connect(
-        self,
-        request: ClientHttpRequest,
-        *,
-        stream: bool = False,
-    ) -> ClientHttpResponse: ...
-
-    @abstractmethod
-    async def close(self) -> None: ...
-
-
-class ClientHttpAuth(ABC):
-    # すべての認証方式の基底となる抽象インターフェース
-
-    @abstractmethod
-    def apply(self, request: ClientHttpRequest, /) -> ClientHttpRequest:
-        return request
-
-class CookieStore(ABC):
-    @abstractmethod
-    def save(self, url: str, cookies: Mapping[str, str], /) -> None: ...
-
-    @abstractmethod
-    def load(self, url: str, /) -> Mapping[str, str]: ...
+        使用例: MediaType.MULTIPART_FORM_DATA.with_parameter("boundary", "something")
+        """
+        return f"{self.value}; {name}={value}"

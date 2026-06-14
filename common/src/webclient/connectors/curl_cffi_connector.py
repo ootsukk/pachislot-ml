@@ -3,53 +3,52 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlparse, urlunparse
 
-from webclient.types import ClientHttpConnector, ClientHttpRequest, ClientHttpResponse
+from webclient.types import CHARSET_UTF8
 
-_curl_cffi_import_error: ImportError | None = None
 if TYPE_CHECKING:
-    from curl_cffi.requests import AsyncSession, Response
-else:
-    try:
-        from curl_cffi.requests import AsyncSession, Response
-    except ImportError as _err:
-        _curl_cffi_import_error = _err
-        AsyncSession = None  # type: ignore
-        Response = None      # type: ignore
+    from curl_cffi import requests
+
+try:
+    import curl_cffi  # noqa: F401
+    _HAS_CURL_CFFI = True
+except ImportError:
+    _HAS_CURL_CFFI = False
 
 
+from webclient.base import (
+    ClientHttpConnector,
+    ClientHttpRequest,
+    ClientHttpResponse,
+    Configurable,
+    ConnectorConfig,
+    ProxyOptions,
+)
+from webclient.utility import Named
+
+
+@Named("curl_cffi")
 @dataclass(frozen=True)
-class CurlCffiConfig:
-    impersonate: str | None = "chrome"
-    max_clients: int = 10
+class CurlCffiConnectorOptions(ConnectorConfig):
+    """
+    curl_cffi 駆動の高速・TLS指紋偽装コネクター用設定オプション。
+    YAMLの `connector: curl_cffi` セクションと全自動マッピングされます。
+    """
+
+    impersonate: str | None = "chrome110"
     verify: bool = True
-    trust_env: bool = True
-    timeout: float | None = None
+    timeout: float = 30.0
 
 
-class CurlCffiClientHttpResponse(ClientHttpResponse):
+# =====================================================================
+# 📌 2. レスポンス・ブリッジ実装（ClientHttpResponse Protocol 準拠）
+# =====================================================================
+class CurlCffiClientHttpResponse:
+    """curl_cffi の Response オブジェクトをコアの ClientHttpResponse 契約へ変換するラッパー"""
 
-    def __init__(self, response: Response) -> None:
-        self._response: Response = response
-
-    async def read_body(self) -> bytes:
-        if hasattr(self._response, "content") and self._response.content:
-            return self._response.content
-
-        body_chunks: list[bytes] = []
-        if hasattr(self._response, "iter_content"):
-            async for chunk in self._response.aiter_content():
-                body_chunks.append(chunk)
-            return b"".join(body_chunks)
-
-        return getattr(self._response, "content", b"")
-
-    async def stream_lines(self) -> AsyncIterator[str]:
-        async for raw_line in self._response.aiter_lines():
-            if isinstance(raw_line, bytes):
-                yield raw_line.decode("utf-8", errors="replace")
-            elif isinstance(raw_line, str):
-                yield raw_line
+    def __init__(self, response: requests.Response) -> None:
+        self._response = response
 
     @property
     def status_code(self) -> int:
@@ -59,92 +58,94 @@ class CurlCffiClientHttpResponse(ClientHttpResponse):
     def headers(self) -> Mapping[str, str]:
         return cast(Mapping[str, str], self._response.headers)
 
+    async def read_body(self) -> bytes:
+        return self._response.content
+
+    async def stream_lines(self) -> AsyncIterator[str]:
+        async for line in cast(AsyncIterator[bytes], self._response.iter_lines()):
+            yield line.decode(CHARSET_UTF8, errors="replace")
+
     async def close(self) -> None:
-        if hasattr(self._response, "close"):
-            self._response.close()
+        pass
 
 
-class CurlCffiClientHttpConnector(ClientHttpConnector):
+class CurlCffiClientHttpConnector(ClientHttpConnector, Configurable[CurlCffiConnectorOptions]):
+    """
+    curl_cffi (libcurl wrapper) 駆動の非同期通信具象コネクター。
+    コアのコンポーネントスキャンによって全自動で検知され、DIレジストリへマウントされます。
+    """
 
     def __init__(
         self,
-        session: AsyncSession | None = None,
-        config: CurlCffiConfig | None = None,
-        /
+        config: CurlCffiConnectorOptions | None = None,
+        proxy_options: ProxyOptions | None = None,
     ) -> None:
-        if _curl_cffi_import_error is not None or AsyncSession is None:
-            raise RuntimeError(
-                "curl_cffi コネクターを使用するには 'curl_cffi' パッケージが必要です。 "
-                "pip install curl_cffi を実行してください。"
-            ) from _curl_cffi_import_error
+        if not _HAS_CURL_CFFI:
+            raise ImportError(
+                "curl_cffi コネクターを使用するには 'curl_cffi' パッケージのインストールが必要です。\n"
+                "コマンド: pip install curl-cffi"
+            )
 
-        self._external_session: bool = session is not None
+        from curl_cffi import requests
 
-        if session is not None:
-            self._session = session
-        else:
-            cffi_config = config if config is not None else CurlCffiConfig()
+        self.config = config if config is not None else CurlCffiConnectorOptions()
+        self.proxy_options = proxy_options
 
-            session_kwargs: dict[str, Any] = {
-                "max_clients": cffi_config.max_clients,
-                "verify": cffi_config.verify,
-                "trust_env": cffi_config.trust_env,
-            }
-            if cffi_config.timeout is not None:
-                session_kwargs["timeout"] = cffi_config.timeout
+        curl_proxies: dict[str, str] = {}
 
-            self._session = AsyncSession(**session_kwargs)
-            self._default_impersonate: str | None = cffi_config.impersonate
+        if self.proxy_options:
+            def _build_proxy_url(base_url: str) -> str:
+                if not self.proxy_options or not self.proxy_options.username:
+                    return base_url
+                parsed = urlparse(base_url)
+                auth_str = f"{self.proxy_options.username}:{self.proxy_options.password or ''}"
+                netloc = f"{auth_str}@{parsed.netloc}"
+                return urlunparse(parsed._replace(netloc=netloc))
 
-    async def connect(
-        self,
-        request: ClientHttpRequest,
-        *,
-        stream: bool = False,
-    ) -> ClientHttpResponse:
-        cffi_auth: Any = None
-        if request.auth is not None:
-            if isinstance(request.auth, tuple):
-                cffi_auth = request.auth
-            elif hasattr(request.auth, "username") and hasattr(request.auth, "password"):
-                auth_any = cast(Any, request.auth)
-                cffi_auth = (auth_any.username, auth_any.password)
-            else:
-                cffi_auth = request.auth
+            if self.proxy_options.http_url:
+                curl_proxies["http"] = _build_proxy_url(self.proxy_options.http_url)
+            if self.proxy_options.https_url:
+                curl_proxies["https"] = _build_proxy_url(self.proxy_options.https_url)
+            if self.proxy_options.no_proxy:
+                # libcurl の NOPROXY 判定規則（CURLOPT_NOPROXY）はカンマ区切り文字列です。
+                # ユーザーが指定した除外設定をそのまま流し込むだけで、libcurl カーネルが
+                # サブドメインのワイルドカード等も含めて超高速に自動バイパス処理を行います。
+                curl_proxies["no_proxy"] = self.proxy_options.no_proxy
+
+        # libcurl ベースの高度な非同期セッションをプール初期化
+        self._session = requests.AsyncSession(
+            verify=self.config.verify,
+            impersonate=cast(Any, self.config.impersonate),
+            proxies=cast(Any, curl_proxies if curl_proxies else None),
+        )
+
+    async def connect(self, request: ClientHttpRequest, *, stream: bool = False) -> ClientHttpResponse:
+        """共通リクエストモデル（ClientHttpRequest）を curl_cffi 固有の引数へ翻訳して送信します"""
+
+        timeout = request.timeout if request.timeout is not None else self.config.timeout
 
         kwargs: dict[str, Any] = {
+            "method": request.method,
+            "url": request.url,
+            "headers": dict(request.headers) if request.headers else None,
             "params": request.params,
             "cookies": request.cookies,
-            "auth": cffi_auth,
+            "timeout": timeout,
             "stream": stream,
         }
 
-        impersonate_target = request.attributes.get(
-            "impersonate",
-            getattr(self, "_default_impersonate", "chrome")
-        )
-        if impersonate_target:
-            kwargs["impersonate"] = impersonate_target
-
-        if request.timeout is not None:
-            kwargs["timeout"] = request.timeout
         if request.json_body is not None:
             kwargs["json"] = request.json_body
         elif request.data is not None:
             kwargs["data"] = request.data
         elif request.content is not None:
             kwargs["data"] = request.content
+
         if request.files is not None:
             kwargs["files"] = request.files
 
-        response = await self._session.request(
-            method=request.method.value,
-            url=request.url,
-            headers=dict(request.headers),
-            **kwargs,
-        )
-        return CurlCffiClientHttpResponse(response)
+        curl_res = await self._session.request(**kwargs)
+        return CurlCffiClientHttpResponse(curl_res)
 
     async def close(self) -> None:
-        if not self._external_session:
-            await self._session.close()
+        await self._session.close()
