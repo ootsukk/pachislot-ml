@@ -14,14 +14,6 @@ def to_snake_case(name: str) -> str:
     return re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
 
 
-def Named(name: str):
-    """【アノテーション】設定クラスや実装クラスの識別名（Component Name）を明示的に上書きします。"""
-    def decorator(cls):
-        cls._custom_name = name
-        return cls
-    return decorator
-
-
 def get_component_name(cls: type[Any]) -> str:
     """クラスに設定された @Named アノテーション、またはクラス名のスネークケースから識別名を安全に抽出します"""
     if hasattr(cls, "_custom_name"):
@@ -54,7 +46,7 @@ def discover_config_classes[T](target_base: type[T], plugin_groups: Sequence[str
     """指定された基底型を継承しているすべての設定クラスを、システム内から動的に全自動検出します。"""
     registry: dict[str, type[T]] = {}
 
-    # A. 組み込みモジュールのルート再帰走査
+    # 組み込みモジュールのルート再帰走査
     import webclient
     for module_info in pkgutil.walk_packages(webclient.__path__, webclient.__name__ + "."):
         try:
@@ -67,7 +59,7 @@ def discover_config_classes[T](target_base: type[T], plugin_groups: Sequence[str
         except ImportError:
             continue
 
-    # B. 複数の外部 Entry Points プラグイングループの並列走査
+    # 複数の外部 Entry Points プラグイングループの並列走査
     for group_name in plugin_groups:
         try:
             for ep in entry_points(group=group_name):

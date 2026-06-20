@@ -6,43 +6,34 @@ from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from typing import cast
 
+from webclient.base import BodyDecoder, BodyEncoder
+from webclient.plugin import plugin_impl
 from webclient.types import CHARSET_UTF8
-
-
-class BodyEncoder(ABC):
-    # オブジェクトをHTTPリクエストで送信可能な形式に変換する抽象エンコーダー
-
-    @abstractmethod
-    def encode(self, obj: object, /) -> object: ...
 
 
 # TODO: Implement PydanticBodyEncoder using pydantic.RootModel / TypeAdapter to support BaseModel serialization.
 # TODO: Implement MsgspecBodyEncoder using msgspec.json.encode for ultra-fast request serialization.
+@plugin_impl("encoder")
 class DefaultBodyEncoder(BodyEncoder):
     # Python標準ライブラリ（json, dataclasses）に準拠したデフォルトのエンコーダー
 
-    def encode(self, obj: object, /) -> object:
-        if obj is None or isinstance(obj, bytes | str | int | float | bool):
-            return obj
-        if isinstance(obj, Mapping | list):
-            return obj
-        if is_dataclass(obj) and not isinstance(obj, type):
-            return asdict(obj)
-        raise ValueError(f"サポートされていないボディのオブジェクト型です: {type(obj)}")
-
-
-class BodyDecoder(ABC):
-
-    @abstractmethod
-    def decode[T](self, data: bytes | str, element_type: type[T], /) -> T: ...
+    def encode(self, body: object, /) -> object:
+        if body is None or isinstance(body, bytes | str | int | float | bool):
+            return body
+        if isinstance(body, Mapping | list):
+            return body
+        if is_dataclass(body) and not isinstance(body, type):
+            return asdict(body)
+        raise ValueError(f"サポートされていないボディのオブジェクト型です: {type(body)}")
 
 
 # TODO: Implement PydanticBodyDecoder using pydantic.TypeAdapter to support BaseModel and robust data validation.
 # TODO: Implement MsgspecBodyDecoder using msgspec.json.Decoder to achieve ultra-high-performance JSON parsing.
+@plugin_impl("decoder")
 class DefaultBodyDecoder(BodyDecoder):
 
-    def decode[T](self, data: bytes | str, element_type: type[T], /) -> T:
-        raw_bytes = data if isinstance(data, bytes) else data.encode(CHARSET_UTF8)
+    def decode[T](self, content: bytes | str, element_type: type[T], /) -> T:
+        raw_bytes = content if isinstance(content, bytes) else content.encode(CHARSET_UTF8)
         if element_type is bytes:
             return cast(T, raw_bytes)
 

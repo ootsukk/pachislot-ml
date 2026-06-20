@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, cast, runtime_checkable
 
+from webclient.plugin import plugin
 from webclient.types import HttpMethod
 from webclient.utility import extract_config_type
 
@@ -24,6 +25,14 @@ class FilterConfig:
     """すべての自動マウントインターセプター（フィルター）構成の基底クラス"""
     enabled: bool = True
     order: int = 50
+
+@dataclass(frozen=True)
+class PrioritizedFilter:
+    """内部でのフィルター順序ソートおよび名前解決を担保するメタデータコンテナ"""
+
+    filter_func: ExchangeFilterFunction
+    priority: int = 0
+    name_key: str | None = None
 
 
 # =====================================================================
@@ -108,12 +117,12 @@ class CookieStore(Protocol):
 
 @runtime_checkable
 class BodyEncoder(Protocol):
-    def encode(self, body: Any, /) -> bytes: ...
+    def encode(self, body: object, /) -> object: ...
 
 
 @runtime_checkable
 class BodyDecoder(Protocol):
-    def decode(self, content: bytes, target_type: type[Any], /) -> Any: ...
+    def decode[T](self, content: bytes, target_type: type[T], /) -> T: ...
 
 
 # =====================================================================

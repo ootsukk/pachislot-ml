@@ -4,8 +4,9 @@ from collections.abc import Mapping
 from urllib.parse import urlparse
 
 from webclient.base import CookieStore
+from webclient.plugin import plugin_impl
 
-
+@plugin_impl("cookie_store")
 class MemoryCookieStore(CookieStore):
     def __init__(self) -> None:
         self._store: dict[str, dict[str, str]] = {}
@@ -25,3 +26,6 @@ class MemoryCookieStore(CookieStore):
         if not host:
             return {}
         return self._store.get(host, {})
+
+    def clear(self) -> None:
+        self._store.clear()

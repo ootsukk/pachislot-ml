@@ -5,16 +5,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
-from webclient.base import ConnectorConfig, FilterConfig, ProxyOptions, RedirectOptions
+from webclient.base import ProxyOptions, RedirectOptions
 from webclient.types import CHARSET_UTF8
-from webclient.utility import discover_config_classes
 
 
 @dataclass(frozen=True)
 class WebClientConfig:
-    """YAMLやPython辞書などのデータ構造と1対1でマッピングされる、不変でスレッドセーフな最上位構成ルートモデル"""
 
-    connector_name: str = "httpx"
+    connector_name: str = "auto"
     connector_options: Mapping[str, Any] = field(default_factory=dict)
 
     base_url: str = ""
@@ -24,16 +22,13 @@ class WebClientConfig:
     default_cookies: Mapping[str, str] = field(default_factory=dict)
     proxy: ProxyOptions | None = None
     redirect: RedirectOptions = field(default_factory=RedirectOptions)
-    filters: Mapping[str, FilterConfig] = field(default_factory=dict)
-    cookie_store: str = "memory"
-    encoder: str = "default"
-    decoder: str = "default"
-    plugin_groups: Sequence[str] = field(default_factory=lambda: ["webclient.plugins"])
 
-    def __getattr__(self, name: str) -> Any:
-        if name in self.filters:
-            return self.filters[name]
-        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+    filters: Mapping[str, Any] = field(default_factory=dict)
+
+    cookie_store: str = "auto"
+    encoder: str = "auto"
+    decoder: str = "auto"
+    plugin_groups: Sequence[str] = field(default_factory=lambda: ["webclient.plugins"])
 
     @classmethod
     def load(cls, source: str | Path | Mapping[str, Any], /) -> WebClientConfig:
@@ -56,7 +51,6 @@ class WebClientConfig:
         if not isinstance(config_data, dict):
             config_data = {}
 
-        # plugin_groups の先行パース
         raw_groups = config_data.get("plugin_groups", config_data.get("plugin_group", ["webclient.plugins"]))
         plugin_groups_val = (
             [raw_groups]
@@ -66,27 +60,18 @@ class WebClientConfig:
             else ["webclient.plugins"]
         )
 
-        available_connectors = discover_config_classes(ConnectorConfig, plugin_groups_val)
-        available_filters = discover_config_classes(FilterConfig, plugin_groups_val)
+        chosen_connector_name = config_data.get("connector_name", "auto")
+        chosen_connector_options: dict[str, Any] = dict(config_data.get("connector_options", {}))
 
-        chosen_connector_name = "httpx"
-        chosen_connector_options: dict[str, Any] = {}
-        raw_connector = config_data.get("connector", "auto")
-
+        raw_connector = config_data.get("connector")
         if isinstance(raw_connector, dict):
             for name_key, props in raw_connector.items():
-                if name_key in available_connectors:
-                    chosen_connector_name = name_key
-                    chosen_connector_options = {k: v for k, v in (props or {}).items() if not k.startswith("_")}
-                    break
-        elif (
-            isinstance(raw_connector, str)
-            and raw_connector.lower() != "auto"
-            and raw_connector.lower() in available_connectors
-        ):
+                chosen_connector_name = name_key
+                chosen_connector_options = {k: v for k, v in (props or {}).items() if not k.startswith("_")}
+                break
+        elif isinstance(raw_connector, str) and raw_connector.lower() != "auto":
             chosen_connector_name = raw_connector.lower()
 
-        # プロキシセクションの自動パース
         proxy_val: ProxyOptions | None = None
         raw_proxy = config_data.get("proxy")
         if isinstance(raw_proxy, dict):
@@ -98,20 +83,18 @@ class WebClientConfig:
                 no_proxy=raw_proxy.get("no_proxy"),
             )
 
-        # フィルターの動的パース＆自動インスタンス化
-        filter_instances: dict[str, FilterConfig] = {}
-        for name_key, config_class in available_filters.items():
-            filter_instances[name_key] = config_class()
+        redirect_val = RedirectOptions()
+        raw_redirect = config_data.get("redirect")
+        if isinstance(raw_redirect, dict):
+            redirect_val = RedirectOptions(
+                follow_redirects=raw_redirect.get("follow_redirects", True),
+                max_redirects=raw_redirect.get("max_redirects", 20),
+            )
 
-        filters_section = config_data.get("filters") or {}
-        for name_key, config_props in filters_section.items():
-            config_class = available_filters.get(name_key)
-            if config_class is not None:
-                filter_instances[name_key] = config_class(
-                    **{k: v for k, v in (config_props or {}).items() if not k.startswith("_")}
-                )
+        filters_section = cast(Mapping[str, Any], config_data.get("filters", {}) or {})
 
         raw_timeout = config_data.get("timeout")
+
         return cls(
             connector_name=chosen_connector_name,
             connector_options=chosen_connector_options,
@@ -121,9 +104,10 @@ class WebClientConfig:
             default_headers=cast(Mapping[str, str], config_data.get("default_headers", {})),
             default_cookies=cast(Mapping[str, str], config_data.get("default_cookies", {})),
             proxy=proxy_val,
-            filters=filter_instances,
-            cookie_store=str(config_data.get("cookie_store", "memory")),
-            encoder=str(config_data.get("encoder", "default")),
-            decoder=str(config_data.get("decoder", "default")),
+            redirect=redirect_val,
+            filters=filters_section,
+            cookie_store=str(config_data.get("cookie_store", "auto")),
+            encoder=str(config_data.get("encoder", "auto")),
+            decoder=str(config_data.get("decoder", "auto")),
             plugin_groups=plugin_groups_val,
         )
