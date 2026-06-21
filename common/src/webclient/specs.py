@@ -63,7 +63,7 @@ class ResponseSpec:
             raise RuntimeError("クローズされたレスポンスからストリームを開始することはできません。")
 
         async def _gen() -> AsyncIterator[T]:
-            async for line in self._response.stream_lines():
+            async for line in self._response.stream_raw_lines():
                 yield self._decoder.decode(line, element_type)
 
         return _gen()
@@ -250,7 +250,7 @@ class RequestHeadersSpec:
             response = await self._exchange_function.exchange(final_request, stream=True)
             try:
                 await self._check_status_and_raise(response)
-                async for line in response.stream_lines():
+                async for line in response.stream_raw_lines():
                     if not line.strip():
                         continue
                     yield self._decoder.decode(line, element_type)

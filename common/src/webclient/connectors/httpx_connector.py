@@ -15,10 +15,9 @@ from webclient.base import (
     ProxyOptions,
     RedirectOptions,
 )
-from webclient.utility import Named
+from webclient.plugin import dependency_module, plugin_impl
 
 
-@Named("httpx")
 @dataclass(frozen=True)
 class HttpxConnectorOptions(ConnectorConfig):
     """標準の HTTPX 非同期コネクター用設定オプション"""
@@ -32,7 +31,7 @@ class HttpxConnectorOptions(ConnectorConfig):
     http2: bool = False
 
 
-class HttpxClientHttpResponse:
+class HttpxClientHttpResponse(ClientHttpResponse):
     """HTTPX の Response オブジェクトをコアの ClientHttpResponse 契約へ変換するラッパー"""
 
     def __init__(self, response: httpx.Response) -> None:
@@ -49,17 +48,31 @@ class HttpxClientHttpResponse:
     async def read_body(self) -> bytes:
         return await self._response.aread()
 
-    async def stream_lines(self) -> AsyncIterator[str]:
-        async for line in self._response.aiter_lines():
-            yield line
+    def stream_lines(self) -> AsyncIterator[str]:
+        return self._response.aiter_lines()
+
+    def stream_raw_lines(self) -> AsyncIterator[bytes]:
+        async def _generator() ->  AsyncIterator[bytes]:
+            buffer = b""
+            async for chunk in self._response.aiter_bytes():
+                buffer += chunk
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    yield line
+            if buffer:
+                yield buffer
+
+        return _generator()
 
     def stream_chunks(self, chunk_size: int = 4096) -> AsyncIterator[bytes]:
-        return self._response.aiter_bytes(chunk_size=chunk_size)
+        return self._response.aiter_bytes(chunk_size)
 
     async def close(self) -> None:
         await self._response.aclose()
 
 
+@dependency_module("httpx", ">=0.24.0")
+@plugin_impl(value="httpx", priority=100)
 class HttpxClientHttpConnector(ClientHttpConnector, Configurable[HttpxConnectorOptions]):
     """
     HTTPX 駆動の非同期通信具象コネクター。

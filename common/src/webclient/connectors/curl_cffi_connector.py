@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse, urlunparse
 
+from webclient.plugin import dependency_module, plugin_impl
 from webclient.types import CHARSET_UTF8, MediaType
 
 if TYPE_CHECKING:
@@ -26,26 +27,16 @@ from webclient.base import (
     ProxyOptions,
     RedirectOptions,
 )
-from webclient.utility import Named
 
 
-@Named("curl_cffi")
 @dataclass(frozen=True)
 class CurlCffiConnectorOptions(ConnectorConfig):
-    """
-    curl_cffi 駆動の高速・TLS指紋偽装コネクター用設定オプション。
-    YAMLの `connector: curl_cffi` セクションと全自動マッピングされます。
-    """
-
     impersonate: str | None = "chrome110"
     verify: bool = True
     timeout: float = 30.0
 
 
-# =====================================================================
-# 📌 2. レスポンス・ブリッジ実装（ClientHttpResponse Protocol 準拠）
-# =====================================================================
-class CurlCffiClientHttpResponse:
+class CurlCffiClientHttpResponse(ClientHttpResponse):
     """curl_cffi の Response オブジェクトをコアの ClientHttpResponse 契約へ変換するラッパー"""
 
     def __init__(self, response: requests.Response) -> None:
@@ -62,18 +53,34 @@ class CurlCffiClientHttpResponse:
     async def read_body(self) -> bytes:
         return self._response.content
 
-    async def stream_lines(self) -> AsyncIterator[str]:
-        async for line in cast(AsyncIterator[bytes], self._response.iter_lines()):
-            yield line.decode(CHARSET_UTF8, errors="replace")
+    def stream_lines(self) -> AsyncIterator[str]:
+        async def _generator() -> AsyncIterator[str]:
+            async for line in cast(AsyncIterator[bytes], self._response.iter_lines()):
+                yield line.decode(CHARSET_UTF8, errors="replace")
 
-    async def stream_chunks(self, chunk_size: int = 4096) -> AsyncIterator[bytes]:
-        async for chunk in cast(AsyncIterator[bytes], self._response.iter_content(chunk_size)):
-            yield chunk
+        return _generator()
+
+    def stream_raw_lines(self) -> AsyncIterator[bytes]:
+        async def _generator() -> AsyncIterator[bytes]:
+            buffer = b""
+            async for chunk in self._response.aiter_content():
+                buffer += chunk
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    yield line
+            if buffer:
+                yield buffer
+
+        return _generator()
+
+    def stream_chunks(self, chunk_size: int = 4096) -> AsyncIterator[bytes]:
+        return cast(AsyncIterator[bytes], self._response.iter_content(chunk_size))
 
     async def close(self) -> None:
         pass
 
-
+@dependency_module("curl-cffi", ">=0.25.0")
+@plugin_impl(value="curl_cffi", priority=150)
 class CurlCffiClientHttpConnector(ClientHttpConnector, Configurable[CurlCffiConnectorOptions]):
     """
     curl_cffi (libcurl wrapper) 駆動の非同期通信具象コネクター。
