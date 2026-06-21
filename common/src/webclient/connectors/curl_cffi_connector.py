@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse, urlunparse
@@ -10,13 +10,6 @@ from webclient.types import CHARSET_UTF8, MediaType
 
 if TYPE_CHECKING:
     from curl_cffi import requests
-
-try:
-    import curl_cffi  # noqa: F401
-    _HAS_CURL_CFFI = True
-except ImportError:
-    _HAS_CURL_CFFI = False
-
 
 from webclient.base import (
     ClientHttpConnector,
@@ -34,6 +27,135 @@ class CurlCffiConnectorOptions(ConnectorConfig):
     impersonate: str | None = "chrome110"
     verify: bool = True
     timeout: float = 30.0
+
+
+@dependency_module("curl-cffi", ">=0.25.0")
+@plugin_impl(value="curl_cffi", priority=150)
+class CurlCffiClientHttpConnector(ClientHttpConnector, Configurable[CurlCffiConnectorOptions]):
+    """
+    curl_cffi (libcurl wrapper) 駆動の非同期通信具象コネクター。
+    コアのコンポーネントスキャンによって全自動で検知され、DIレジストリへマウントされます。
+    """
+
+    def __init__(
+        self,
+        config: CurlCffiConnectorOptions | None = None,
+        proxy_options: ProxyOptions | None = None,
+        redirect_options: RedirectOptions | None = None,
+    ) -> None:
+
+        self.config = config if config is not None else CurlCffiConnectorOptions()
+        self.proxy_options = proxy_options if proxy_options is not None else ProxyOptions()
+        self.redirect_options = redirect_options if redirect_options is not None else RedirectOptions()
+
+        curl_proxies = self._build_proxy_map()
+
+        self._session = requests.AsyncSession(
+            verify=self.config.verify,
+            impersonate=cast(Any, self.config.impersonate),
+            proxies=cast(Any, curl_proxies if curl_proxies else None),
+        )
+
+    async def exchange(self, request: ClientHttpRequest, *, stream: bool = False) -> ClientHttpResponse:
+        """共通リクエストモデル（ClientHttpRequest）を curl_cffi 固有の引数へ翻訳して送信します"""
+
+        kwargs = self._build_request_kwargs(request, stream)
+
+        # マルチパートボディ要件がある場合は、関数化されたビルダーで安全にインポーズ
+        if request.multipart_body:
+            self._inject_multipart_payload(request.multipart_body, kwargs)
+
+        # 手動指定ファイルマップがある場合のマージ（互換性維持）
+        if request.files is not None:
+            self._merge_explicit_files(request.files, kwargs)
+
+        curl_res = await self._session.request(**kwargs)
+        return CurlCffiClientHttpResponse(curl_res)
+
+    async def close(self) -> None:
+        await self._session.close()
+
+    def _build_proxy_map(self) -> dict[str, str]:
+        """curl_cffi (libcurl) が要求するプロキシマッピング構造を生成します"""
+        curl_proxies: dict[str, str] = {}
+        if not self.proxy_options:
+            return curl_proxies
+
+        if self.proxy_options.http_url:
+            curl_proxies["http"] = self._build_proxy_authenticated_url(self.proxy_options.http_url)
+        if self.proxy_options.https_url:
+            curl_proxies["https"] = self._build_proxy_authenticated_url(self.proxy_options.https_url)
+
+        if self.proxy_options.no_proxy:
+            # libcurl の NOPROXY 判定規則（CURLOPT_NOPROXY）はカンマ区切り文字列そのもの。
+            # HTTPXのようにホストごとにトランスポートを分離して再マウントする手続き型ハックは一切不要。
+            # 除外設定文字列を流し込むだけで、libcurl カーネルが超高速に自動透過バイパスを執行します。
+            curl_proxies["no_proxy"] = self.proxy_options.no_proxy
+
+        return curl_proxies
+
+    def _build_proxy_authenticated_url(self, base_url: str) -> str:
+        """プロキシURLに対し、ユーザー認証資格情報を安全に埋め込みインポーズします"""
+        if not self.proxy_options or not self.proxy_options.username:
+            return base_url
+        parsed = urlparse(base_url)
+        auth_str = f"{self.proxy_options.username}:{self.proxy_options.password or ''}"
+        return urlunparse(parsed._replace(netloc=f"{auth_str}@{parsed.netloc}"))
+
+    def _build_request_kwargs(self, request: ClientHttpRequest, stream: bool) -> dict[str, Any]:
+        """ClientHttpRequest から curl_cffi 標準リクエスト引数へのプレーンマッピングを執行します"""
+        timeout = request.timeout if request.timeout is not None else self.config.timeout
+
+        kwargs: dict[str, Any] = {
+            "method": request.method,
+            "url": request.url,
+            "headers": dict(request.headers) if request.headers else None,
+            "params": request.params,
+            "cookies": request.cookies,
+            "timeout": timeout,
+            "stream": stream,
+            "allow_redirects": self.redirect_options.follow_redirects,
+            "max_redirects": self.redirect_options.max_redirects,
+        }
+
+        # 排他積載ボディのマッピング
+        if request.json_body is not None:
+            kwargs["json"] = request.json_body
+        elif request.data is not None:
+            kwargs["data"] = request.data
+        elif request.content is not None:
+            kwargs["data"] = request.content
+
+        return kwargs
+
+    def _inject_multipart_payload(self, multipart_body: Sequence[Any], kwargs_ref: dict[str, Any]) -> None:
+        """マルチパートセグメントを、curl_cffi (requests互換) の3要素タプル形式へとパッキングします"""
+        curl_data: dict[str, Any] = {}
+        curl_files: dict[str, Any] = {}
+
+        for part in multipart_body:
+            if part.filename is None and part.content_type is None:
+                # 通常のテキストフィールド
+                curl_data[part.name] = part.value
+            else:
+                # 構造: (ファイル名, コンテンツデータ, Content-Type)
+                curl_files[part.name] = (
+                    part.filename or "",  # 空文字を渡すことで、libcurl側に強制的ファイルパート認識を執行
+                    part.value,
+                    part.content_type or MediaType.OCTET_STREAM,
+                )
+
+        if curl_data:
+            kwargs_ref["data"] = curl_data
+        if curl_files:
+            kwargs_ref["files"] = curl_files
+
+    def _merge_explicit_files(self, explicit_files: Mapping[str, Any], kwargs_ref: dict[str, Any]) -> None:
+        """手動指定された生ファイルマップ（request.files）を安全にマージして統合します"""
+        existing_files = kwargs_ref.get("files", {})
+        merged_files = dict(existing_files) if existing_files else {}
+        merged_files.update(explicit_files)
+        kwargs_ref["files"] = merged_files
 
 
 class CurlCffiClientHttpResponse(ClientHttpResponse):
@@ -78,117 +200,3 @@ class CurlCffiClientHttpResponse(ClientHttpResponse):
 
     async def close(self) -> None:
         pass
-
-@dependency_module("curl-cffi", ">=0.25.0")
-@plugin_impl(value="curl_cffi", priority=150)
-class CurlCffiClientHttpConnector(ClientHttpConnector, Configurable[CurlCffiConnectorOptions]):
-    """
-    curl_cffi (libcurl wrapper) 駆動の非同期通信具象コネクター。
-    コアのコンポーネントスキャンによって全自動で検知され、DIレジストリへマウントされます。
-    """
-
-    def __init__(
-        self,
-        config: CurlCffiConnectorOptions | None = None,
-        proxy_options: ProxyOptions | None = None,
-        redirect_options: RedirectOptions | None = None,
-    ) -> None:
-        if not _HAS_CURL_CFFI:
-            raise ImportError(
-                "curl_cffi コネクターを使用するには 'curl_cffi' パッケージのインストールが必要です。\n"
-                "コマンド: pip install curl-cffi"
-            )
-
-        from curl_cffi import requests
-
-        self.config = config if config is not None else CurlCffiConnectorOptions()
-        self.proxy_options = proxy_options if proxy_options is not None else ProxyOptions()
-        self.redirect_options = redirect_options if redirect_options is not None else RedirectOptions()
-
-        curl_proxies: dict[str, str] = {}
-
-        if self.proxy_options:
-            def _build_proxy_url(base_url: str) -> str:
-                if not self.proxy_options or not self.proxy_options.username:
-                    return base_url
-                parsed = urlparse(base_url)
-                auth_str = f"{self.proxy_options.username}:{self.proxy_options.password or ''}"
-                netloc = f"{auth_str}@{parsed.netloc}"
-                return urlunparse(parsed._replace(netloc=netloc))
-
-            if self.proxy_options.http_url:
-                curl_proxies["http"] = _build_proxy_url(self.proxy_options.http_url)
-            if self.proxy_options.https_url:
-                curl_proxies["https"] = _build_proxy_url(self.proxy_options.https_url)
-            if self.proxy_options.no_proxy:
-                # libcurl の NOPROXY 判定規則（CURLOPT_NOPROXY）はカンマ区切り文字列です。
-                # ユーザーが指定した除外設定をそのまま流し込むだけで、libcurl カーネルが
-                # サブドメインのワイルドカード等も含めて超高速に自動バイパス処理を行います。
-                curl_proxies["no_proxy"] = self.proxy_options.no_proxy
-
-        # libcurl ベースの高度な非同期セッションをプール初期化
-        self._session = requests.AsyncSession(
-            verify=self.config.verify,
-            impersonate=cast(Any, self.config.impersonate),
-            proxies=cast(Any, curl_proxies if curl_proxies else None),
-        )
-
-    async def connect(self, request: ClientHttpRequest, *, stream: bool = False) -> ClientHttpResponse:
-        """共通リクエストモデル（ClientHttpRequest）を curl_cffi 固有の引数へ翻訳して送信します"""
-
-        timeout = request.timeout if request.timeout is not None else self.config.timeout
-
-        kwargs: dict[str, Any] = {
-            "method": request.method,
-            "url": request.url,
-            "headers": dict(request.headers) if request.headers else None,
-            "params": request.params,
-            "cookies": request.cookies,
-            "timeout": timeout,
-            "stream": stream,
-            "allow_redirects": self.redirect_options.follow_redirects,
-            "max_redirects": self.redirect_options.max_redirects,
-        }
-
-        if request.json_body is not None:
-            kwargs["json"] = request.json_body
-        elif request.data is not None:
-            kwargs["data"] = request.data
-        elif request.content is not None:
-            kwargs["data"] = request.content
-
-        if request.multipart_body:
-            curl_data: dict[str, Any] = {}
-            curl_files: dict[str, Any] = {}
-
-            for part in request.multipart_body:
-                if part.filename is None and part.content_type is None:
-                    # 通常のテキストフォーム値
-                    curl_data[part.name] = part.value
-                else:
-                    # requests互換のファイル表現構造（3要素タプル）へ翻訳
-                    # 構造: (ファイル名, コンテンツ, Content-Type)
-                    # 注: ユーザーがテキスト（str）を渡した場合、requests互換層で
-                    # 自動エンコードされますが、バイナリの安全性のためにキャストを透過させます。
-                    curl_files[part.name] = (
-                        part.filename or "",  # 空文字にフォールバックしてファイルパート化を強制
-                        part.value,
-                        part.content_type or MediaType.OCTET_STREAM,
-                    )
-
-            if curl_data:
-                kwargs["data"] = curl_data
-            if curl_files:
-                kwargs["files"] = curl_files
-
-        if request.files is not None:
-            # 手動での生指定がある場合のマージ（互換性維持）
-            existing_files = kwargs.get("files", {})
-            existing_files.update(request.files)
-            kwargs["files"] = existing_files
-
-        curl_res = await self._session.request(**kwargs)
-        return CurlCffiClientHttpResponse(curl_res)
-
-    async def close(self) -> None:
-        await self._session.close()

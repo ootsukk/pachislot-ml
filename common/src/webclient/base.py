@@ -104,7 +104,7 @@ class ClientHttpResponse(Protocol):
 
 @runtime_checkable
 class ClientHttpConnector(Protocol):
-    async def connect(self, request: ClientHttpRequest, *, stream: bool = False) -> ClientHttpResponse: ...
+    async def exchange(self, request: ClientHttpRequest, *, stream: bool = False) -> ClientHttpResponse: ...
     async def close(self) -> None: ...
 
 
@@ -152,7 +152,7 @@ class DefaultConnectorExchangeFunction(ExchangeFunction):
         self._connector: ClientHttpConnector = connector
 
     async def exchange(self, request: ClientHttpRequest, *, stream: bool = False) -> ClientHttpResponse:
-        return await self._connector.connect(request, stream=stream)
+        return await self._connector.exchange(request, stream=stream)
 
 
 class FilteredExchangeFunction(ExchangeFunction):
