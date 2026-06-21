@@ -84,10 +84,10 @@ class UniversalPluginResolver:
 
     @classmethod
     def resolve_all(
-        cls, config: WebClientConfig, type_pool: dict[type[Any], Any], explicit_pool: dict[type[Any], Any]
+        cls, config: WebClientConfig, client_extension_pool: dict[type[Any], Any], explicit_pool: dict[type[Any], Any]
     ) -> dict[type[Any], Any]:
         """トポロジカルソート順に、すべてのコンポーネントを透過的に解決するメインループ"""
-        local_pool = dict(type_pool)
+        local_pool = dict(client_extension_pool)
         plugin_groups = getattr(config, "plugin_groups", ["webclient.plugins"])
 
         local_pool[WebClientConfig] = config

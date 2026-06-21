@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 from urllib.parse import urlparse, urlunparse
 
 from webclient.plugin import dependency_module, plugin_impl
@@ -200,3 +200,7 @@ class CurlCffiClientHttpResponse(ClientHttpResponse):
 
     async def close(self) -> None:
         pass
+
+@runtime_checkable
+class CurlCffiClientCustomizer(Protocol):
+    def customize_client(self, client: requests.AsyncSession, /) -> None: ...

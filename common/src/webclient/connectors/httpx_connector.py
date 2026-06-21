@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -232,3 +232,10 @@ class HttpxClientHttpResponse(ClientHttpResponse):
 
     async def close(self) -> None:
         await self._response.aclose()
+
+@runtime_checkable
+class HttpxClientCustomizer(Protocol):
+
+    def customize_client(self, client: httpx.AsyncClient, /) -> None:
+        """生成直後の AsyncClient インスタンスを生で受け取り、event_hooks などの処理を実行します。"""
+        ...

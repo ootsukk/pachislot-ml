@@ -169,6 +169,8 @@ class BaseWebClientBuilder(ABC):
 
         # コード側から手動で直撃インジェクション（上書き指定）された生アセットを保持する優先プール
         self._explicit_pool: dict[type[Any], Any] = {}
+        # HTTPクライアント（httpx等）をカスタマイズする格納庫
+        self._client_extension_pool: dict[type[Any], Any] = {}
 
         self._context_attributes: list[tuple[ContextVar[object], str]] = []
         self._is_mutated: bool = False
@@ -234,6 +236,11 @@ class BaseWebClientBuilder(ABC):
         self._default_timeout = timeout
         return self
 
+    def register_client_customizer(self, type_key: type[Any], instance: Any, /) -> Self:
+        """HTTP Clientの Customizer を登録する。"""
+        self._client_extension_pool[type_key] = instance
+        return self
+
     @abstractmethod
     def build(self) -> WebClient:
         pass
@@ -280,7 +287,9 @@ class DefaultWebClientBuilder(BaseWebClientBuilder):
 
         fake_empty_config = WebClientConfig(plugin_groups=self._plugin_groups)
         resolved_pool = UniversalPluginResolver.resolve_all(
-            fake_empty_config, type_pool={}, explicit_pool=self._explicit_pool
+            fake_empty_config,
+            client_extension_pool=self._client_extension_pool,
+            explicit_pool=self._explicit_pool,
         )
         return self._create_client_core(resolved_pool, fake_empty_config)
 
@@ -309,6 +318,8 @@ class CustomizeWebClientBuilder(BaseWebClientBuilder):
 
     def build(self) -> WebClient:
         resolved_pool = UniversalPluginResolver.resolve_all(
-            self._config, type_pool={}, explicit_pool=self._explicit_pool
+            self._config,
+            client_extension_pool=self._client_extension_pool,
+            explicit_pool=self._explicit_pool,
         )
         return self._create_client_core(resolved_pool, self._config)
