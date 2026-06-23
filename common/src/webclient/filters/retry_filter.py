@@ -10,14 +10,12 @@ from webclient.base import (
     Configurable,
     ExchangeFilter,
     ExchangeFunction,
-    FilterConfig,
 )
-from webclient.utility import Named
+from webclient.plugin import plugin_impl
 
 
-@Named("retry")
 @dataclass(frozen=True)
-class RetryPolicy(FilterConfig):
+class RetryPolicy:
     """一時的なネットワーク障害を自動救済するインテリジェントリトライポリシー"""
     order: int = 30
     max_attempts: int = 3
@@ -25,6 +23,7 @@ class RetryPolicy(FilterConfig):
     retry_statuses: set[int] = {408, 429, 500, 502, 503, 504}
 
 
+@plugin_impl(value="retry", priority=100)
 class RetryFilter(ExchangeFilter, Configurable[RetryPolicy]):
     def __init__(self, config: RetryPolicy | None = None, /, logger: logging.Logger | None = None) -> None:
         self.config: RetryPolicy = config if config is not None else RetryPolicy()

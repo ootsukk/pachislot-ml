@@ -11,7 +11,6 @@ from webclient.base import (
     ClientHttpRequest,
     ClientHttpResponse,
     Configurable,
-    ConnectorConfig,
     ProxyOptions,
     RedirectOptions,
 )
@@ -19,7 +18,7 @@ from webclient.plugin import dependency_module, plugin_impl
 
 
 @dataclass(frozen=True)
-class HttpxConnectorOptions(ConnectorConfig):
+class HttpxConnectorOptions:
     """標準の HTTPX 非同期コネクター用設定オプション"""
 
     max_connections: int = 100

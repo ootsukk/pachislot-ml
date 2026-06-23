@@ -16,14 +16,13 @@ from webclient.base import (
     ClientHttpRequest,
     ClientHttpResponse,
     Configurable,
-    ConnectorConfig,
     ProxyOptions,
     RedirectOptions,
 )
 
 
 @dataclass(frozen=True)
-class CurlCffiConnectorOptions(ConnectorConfig):
+class CurlCffiConnectorOptions:
     impersonate: str | None = "chrome110"
     verify: bool = True
     timeout: float = 30.0

@@ -4,11 +4,13 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from webclient.base import ClientHttpRequest, ClientHttpResponse, ExchangeFilter, ExchangeFunction
+from webclient.plugin import plugin_impl
 
 if TYPE_CHECKING:
     from contextvars import ContextVar
 
 
+@plugin_impl("context_attributes", priority=210)
 class ContextAttributesFilter(ExchangeFilter):
     def __init__(self, context_var: ContextVar[object], attribute_key: str, /) -> None:
         self.context_var: ContextVar[object] = context_var

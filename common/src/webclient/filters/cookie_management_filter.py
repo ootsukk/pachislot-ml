@@ -6,22 +6,21 @@ from http.cookies import SimpleCookie
 from webclient.base import (
     ClientHttpRequest,
     ClientHttpResponse,
+    Configurable,
     CookieStore,
     ExchangeFilter,
     ExchangeFunction,
-    FilterConfig,
 )
-from webclient.utility import Named
+from webclient.plugin import plugin_impl
 
 
-@Named("cookie_management")
 @dataclass(frozen=True)
-class CookieSessionOptions(FilterConfig):
+class CookieSessionOptions:
     """状態維持（有状態セッション）を自動化するクッキー管理フィルター設定"""
     order: int = 40
 
-
-class CookieManagementFilter(ExchangeFilter):
+@plugin_impl("cookie_management", priority=80)
+class CookieManagementFilter(ExchangeFilter, Configurable[CookieSessionOptions]):
     def __init__(self, cookie_store: CookieStore, /) -> None:
         self.cookie_store: CookieStore = cookie_store
 

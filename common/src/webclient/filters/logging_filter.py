@@ -12,15 +12,13 @@ from webclient.base import (
     Configurable,
     ExchangeFilter,
     ExchangeFunction,
-    FilterConfig,
 )
+from webclient.plugin import plugin_impl
 from webclient.types import CHARSET_UTF8
-from webclient.utility import Named
 
 
-@Named("logging")
 @dataclass(frozen=True)
-class LogTrackerSettings(FilterConfig):
+class LogTrackerOptions:
     """リクエスト・レスポンスの核心コンテキストを透過追跡する可視化フィルター設定"""
     order: int = 20
     show_request_headers: bool = True
@@ -28,6 +26,28 @@ class LogTrackerSettings(FilterConfig):
     show_request_body: bool = True
     show_response_body: bool = True
     max_html_body_length: int = 200
+
+
+@plugin_impl(value="logging", priority=200)
+class LoggingFilter(ExchangeFilter, Configurable[LogTrackerOptions]):
+    def __init__(self, config: LogTrackerOptions, /, logger: logging.Logger | None = None) -> None:
+        self.config: LogTrackerOptions = config
+        self.formatter: LogFormatter = VerboseLogFormatter(config)
+        self.logger: logging.Logger = logger if logger is not None else logging.getLogger("webclient.filter.logging")
+
+    async def __call__(
+        self, request: ClientHttpRequest, next_exchange: ExchangeFunction, stream: bool, /
+    ) -> ClientHttpResponse:
+        request_log = await self.formatter.format_request(request)
+        self.logger.info(request_log)
+        try:
+            response = await next_exchange.exchange(request, stream=stream)
+            response_log = await self.formatter.format_response(response, stream=stream)
+            self.logger.info(response_log)
+            return response
+        except Exception as err:
+            self.logger.error(f"HTTP Request failed: {request.method} {request.url} - Error: {err}")
+            raise
 
 
 class LogFormatter(ABC):
@@ -38,8 +58,8 @@ class LogFormatter(ABC):
 
 
 class VerboseLogFormatter(LogFormatter):
-    def __init__(self, config: LogTrackerSettings, /) -> None:
-        self._config: LogTrackerSettings = config
+    def __init__(self, config: LogTrackerOptions, /) -> None:
+        self._config: LogTrackerOptions = config
 
     def _extract_content_type(self, headers: Mapping[str, str], /) -> str:
         for key, value in headers.items():
@@ -82,24 +102,3 @@ class VerboseLogFormatter(LogFormatter):
             body_str = self._format_body_by_type(content_type, raw_body)
             components.append(f"  Body: {body_str}")
         return "\n".join(components)
-
-
-class LoggingFilter(ExchangeFilter, Configurable[LogTrackerSettings]):
-    def __init__(self, config: LogTrackerSettings, /, logger: logging.Logger | None = None) -> None:
-        self.config: LogTrackerSettings = config
-        self.formatter: LogFormatter = VerboseLogFormatter(config)
-        self.logger: logging.Logger = logger if logger is not None else logging.getLogger("webclient.filter.logging")
-
-    async def __call__(
-        self, request: ClientHttpRequest, next_exchange: ExchangeFunction, stream: bool, /
-    ) -> ClientHttpResponse:
-        request_log = await self.formatter.format_request(request)
-        self.logger.info(request_log)
-        try:
-            response = await next_exchange.exchange(request, stream=stream)
-            response_log = await self.formatter.format_response(response, stream=stream)
-            self.logger.info(response_log)
-            return response
-        except Exception as err:
-            self.logger.error(f"HTTP Request failed: {request.method} {request.url} - Error: {err}")
-            raise

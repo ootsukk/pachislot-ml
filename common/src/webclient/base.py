@@ -14,18 +14,6 @@ from webclient.utility import extract_config_type
 # =====================================================================
 
 @dataclass(frozen=True)
-class ConnectorConfig:
-    """すべての下位通信コネクター構成の基底クラス"""
-    pass
-
-
-@dataclass(frozen=True)
-class FilterConfig:
-    """すべての自動マウントインターセプター（フィルター）構成の基底クラス"""
-    enabled: bool = True
-    order: int = 50
-
-@dataclass(frozen=True)
 class PrioritizedFilter:
     """内部でのフィルター順序ソートおよび名前解決を担保するメタデータコンテナ"""
 
