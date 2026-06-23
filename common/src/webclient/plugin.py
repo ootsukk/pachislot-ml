@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Any, overload
 
 # 仕様（インターフェース）の登録プール
 _REGISTERED_SPECS: list[type[Any]] = []
@@ -32,8 +32,19 @@ class DependencyModuleMeta:
         self.module_name = module_name  # pipに登録されている実際のパッケージ名
         self.version = version  # 要求するセマンティックバージョン条件（例: '>=0.5.0'）
 
+# カッコなし@plugin
+@overload
+def plugin[T: type[Any]](cls: T, /) -> T: ...
 
-def plugin(depends_on: type[Any] | Sequence[type[Any]] | None = None):
+# カッコ付き@plugin()
+@overload
+def plugin(*, depends_on: type[Any] | Sequence[type[Any]] | None = None) -> Callable[[Any], Any]: ...
+
+def plugin(
+    cls_or_none: type[Any] | None = None,
+    *,
+    depends_on: type[Any] | Sequence[type[Any]] | None = None,
+) -> Any:
     """拡張仕様インターフェース（Protocol/ABC）に付与するドメインアノテーション"""
 
     def decorator(cls: type[Any]) -> type[Any]:

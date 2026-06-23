@@ -6,35 +6,13 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, cast, runtime_checkable
 
+from webclient.plugin import plugin
 from webclient.types import HttpMethod
 from webclient.utility import extract_config_type
 
 # =====================================================================
-#  設定オブジェクト用 基底クラス群
+#  設定オブジェクト
 # =====================================================================
-
-@dataclass(frozen=True)
-class PrioritizedFilter:
-    """内部でのフィルター順序ソートおよび名前解決を担保するメタデータコンテナ"""
-
-    filter_func: ExchangeFilterFunction
-    priority: int = 0
-    name_key: str | None = None
-
-
-# =====================================================================
-#  コア・データモデル ＆ インターフェース（Protocol）
-# =====================================================================
-
-@dataclass(frozen=True)
-class MultipartPart:
-    """マルチパートリクエストを構成する、個々の独立したパート（要素）を表す不変データコンテナ"""
-
-    name: str
-    value: bytes | str
-    filename: str | None = None
-    content_type: str | None = None
-    headers: Mapping[str, str] = field(default_factory=dict)
 
 @dataclass(frozen=True)
 class ProxyOptions:
@@ -46,12 +24,29 @@ class ProxyOptions:
     password: str | None = None
     no_proxy: str | None = None
 
+
 @dataclass(frozen=True)
 class RedirectOptions:
     """すべての通信コネクターで一貫して適用される、自動リダイレクト制御の共通構成データ構造"""
 
     follow_redirects: bool = True
     max_redirects: int = 20
+
+
+@dataclass(frozen=True)
+class MultipartPart:
+    """マルチパートリクエストを構成する、個々の独立したパート（要素）を表す不変データコンテナ"""
+
+    name: str
+    value: bytes | str
+    filename: str | None = None
+    content_type: str | None = None
+    headers: Mapping[str, str] = field(default_factory=dict)
+
+
+# =====================================================================
+#  コア・データモデル ＆ インターフェース（Protocol）
+# =====================================================================
 
 @dataclass(frozen=True)
 class ClientHttpRequest:
@@ -72,12 +67,6 @@ class ClientHttpRequest:
 
 
 @runtime_checkable
-class ClientHttpAuth(Protocol):
-    def apply(self, request: ClientHttpRequest, /) -> ClientHttpRequest:
-        return request
-
-
-@runtime_checkable
 class ClientHttpResponse(Protocol):
     @property
     def status_code(self) -> int: ...
@@ -89,46 +78,65 @@ class ClientHttpResponse(Protocol):
     def stream_chunks(self, chunk_size: int = 4096) -> AsyncIterator[bytes]: ...
     async def close(self) -> None: ...
 
+@runtime_checkable
+@plugin
+class BodyEncoder(Protocol):
+    def encode(self, body: object, /) -> object: ...
+
 
 @runtime_checkable
+@plugin
+class BodyDecoder(Protocol):
+    def decode[T](self, content: bytes, target_type: type[T], /) -> T: ...
+
+@runtime_checkable
+@plugin(depends_on=[BodyDecoder, BodyDecoder])
 class ClientHttpConnector(Protocol):
     async def exchange(self, request: ClientHttpRequest, *, stream: bool = False) -> ClientHttpResponse: ...
     async def close(self) -> None: ...
 
 
 @runtime_checkable
+@plugin
+class ClientHttpAuth(Protocol):
+    def apply(self, request: ClientHttpRequest, /) -> ClientHttpRequest:
+        return request
+
+
+@runtime_checkable
+@plugin
 class CookieStore(Protocol):
     def save(self, url: str, cookies: Mapping[str, str], /) -> None: ...
     def load(self, url: str, /) -> Mapping[str, str]: ...
     def clear(self) -> None: ...
 
 
-@runtime_checkable
-class BodyEncoder(Protocol):
-    def encode(self, body: object, /) -> object: ...
-
-
-@runtime_checkable
-class BodyDecoder(Protocol):
-    def decode[T](self, content: bytes, target_type: type[T], /) -> T: ...
-
-
 # =====================================================================
-#  フィルターチェーン用 実行パイプラインインフラ
+#  フィルターチェーン関連クラス
 # =====================================================================
 
-class ExchangeFunction(ABC):
-    """リクエストを受け取り、レスポンスを返す実行チェーンの抽象契約"""
-    @abstractmethod
-    async def exchange(self, request: ClientHttpRequest, *, stream: bool = False) -> ClientHttpResponse: ...
-
-
 @runtime_checkable
+@plugin
 class ExchangeFilter(Protocol):
     """具象フィルターが実装すべきインターフェース契約"""
     async def __call__(
         self, request: ClientHttpRequest, next_exchange: ExchangeFunction, stream: bool, /
     ) -> ClientHttpResponse: ...
+
+
+@dataclass(frozen=True)
+class PrioritizedFilter:
+    """内部でのフィルター順序ソートおよび名前解決を担保するメタデータコンテナ"""
+
+    filter_func: ExchangeFilterFunction
+    priority: int = 0
+    name_key: str | None = None
+
+
+class ExchangeFunction(ABC):
+    """リクエストを受け取り、レスポンスを返す実行チェーンの抽象契約"""
+    @abstractmethod
+    async def exchange(self, request: ClientHttpRequest, *, stream: bool = False) -> ClientHttpResponse: ...
 
 
 ExchangeFilterFunction = (ExchangeFilter | Any)
