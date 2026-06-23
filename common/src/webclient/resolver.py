@@ -35,7 +35,7 @@ class UniversalPluginResolver:
         ConfigPropertyComponent(RedirectOptions, key="redirect", mandatory=False),
         FlatComponent(BodyEncoder, key="encoder"),
         FlatComponent(BodyDecoder, key="decoder"),
-        FlatComponent(ClientHttpConnector, key="connector_name"),
+        FlatComponent(ClientHttpConnector, key="http_connector"),
         FlatComponent(CookieStore, key="cookie_store", mandatory=False),
         ListComponent(
             PrioritizedFilter,
