@@ -16,6 +16,7 @@ from webclient.base import (
 )
 from webclient.codec import BodyDecoder, BodyEncoder, DefaultBodyDecoder, DefaultBodyEncoder
 from webclient.config import WebClientConfig
+from webclient.constants import ENTRY_POINT_TARGET
 from webclient.cookies import MemoryCookieStore
 from webclient.resolver import UniversalPluginResolver
 from webclient.specs import RequestBodySpec, RequestBodyUriSpec, RequestHeadersUriSpec
@@ -160,7 +161,7 @@ class WebClient:
 class BaseWebClientBuilder(ABC):
 
     def __init__(self) -> None:
-        self._plugin_groups: list[str] = ["webclient.plugins"]
+        self._plugin_groups: list[str] = [ENTRY_POINT_TARGET]
         self._base_url: str = ""
         self._api_version: str = "v1"
         self._default_headers: Mapping[str, str] = {}

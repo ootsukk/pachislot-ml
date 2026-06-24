@@ -9,6 +9,22 @@ from importlib.metadata import entry_points
 from typing import Any
 
 
+def deep_merge(target: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
+    """2つの辞書構造を再帰的に巡回し、ネストされた子辞書を安全に重ね合わせる汎用関数。
+
+    target 側の内部状態を破壊せず、source 側の指定値を最優先として上書きした
+    独立した新しいマージ済みの辞書オブジェクトを返却します。
+    """
+    merged = dict(target)
+    for k, v in source.items():
+        if isinstance(v, dict) and isinstance(merged.get(k), dict):
+            # 双方ともに辞書であれば、さらに深い階層へ再帰的に潜って融合
+            merged[k] = deep_merge(merged[k], v)
+        else:
+            # どちらかが辞書でなければ、source 側の指定値を最優先として上書き
+            merged[k] = v
+    return merged
+
 def to_snake_case(name: str) -> str:
     """CamelCase を snake_case に汎用変換するユーティリティ"""
     return re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()

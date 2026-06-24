@@ -19,6 +19,7 @@ from webclient.base import (
 )
 from webclient.codec import BodyDecoder, BodyEncoder
 from webclient.config import WebClientConfig
+from webclient.constants import ENTRY_POINT_TARGET
 from webclient.cookies import CookieStore
 from webclient.plugin import Component, ConfigPropertyComponent, FlatComponent, ListComponent, PluginNameKey
 
@@ -88,7 +89,7 @@ class UniversalPluginResolver:
     ) -> dict[type[Any], Any]:
         """トポロジカルソート順に、すべてのコンポーネントを透過的に解決するメインループ"""
         local_pool = dict(client_extension_pool)
-        plugin_groups = getattr(config, "plugin_groups", ["webclient.plugins"])
+        plugin_groups = getattr(config, "plugin_groups", [ENTRY_POINT_TARGET])
 
         local_pool[WebClientConfig] = config
 
@@ -113,7 +114,7 @@ class UniversalPluginResolver:
         """
         spec_type = component.target_type
 
-        # 1. YAML等の設定値からターゲット名を取得（未指定、空、または辞書内包の場合は None や auto になり得る）
+        # YAML等の設定値からターゲット名を取得（未指定、空、または辞書内包の場合は None や auto になり得る）
         target_name: str | None = None
         if isinstance(raw_section, str):
             target_name = raw_section
@@ -152,7 +153,7 @@ class UniversalPluginResolver:
         config_object: Any = None
         local_type_pool = dict(type_pool)
 
-        # 2. Configurable なクラスだった場合の、専用 Config オブジェクトの動的生成
+        # Configurable なクラスだった場合の、専用 Config オブジェクトの動的生成
         if issubclass(impl_class, Configurable):
             config_class = cls._extract_config_type(impl_class)
 
@@ -181,7 +182,7 @@ class UniversalPluginResolver:
                 local_type_pool[type(config_object)] = config_object
                 local_type_pool[config_class] = config_object
 
-        # 3. 【リフレクション】シグネチャをスキャンし、引数を依存関係プールから全自動インジェクション
+        # 【リフレクション】シグネチャをスキャンし、引数を依存関係プールから全自動インジェクション
         sig = inspect.signature(impl_class)
         kwargs: dict[str, Any] = {}
 
@@ -194,7 +195,7 @@ class UniversalPluginResolver:
             if resolved_val is not None:
                 kwargs[param_name] = resolved_val
 
-        # 4. 完全自動インジェクションされた引数を流し込んで、ピュアにインスタンス化して出荷
+        # 完全自動インジェクションされた引数を流し込んで、ピュアにインスタンス化して出荷
         try:
             return impl_class(**kwargs)
         except TypeError:
@@ -246,7 +247,7 @@ class UniversalPluginResolver:
         if cache_key in cls._registry_cache:
             return {spec: slot.copy() for spec, slot in cls._registry_cache[cache_key].items()}
 
-        # 🚀 【タイムラインの調律】具象クラス（実装）をスキャンし始める「前」に、
+        # 【タイムラインの調律】具象クラス（実装）をスキャンし始める「前」に、
         # サードパーティ側がエントリーポイントに仕込んだ Component の動的拡張ファイル（mount.py）を全探索して強制 import する！
         try:
             for ep in entry_points(group="webclient.components"):
@@ -262,7 +263,7 @@ class UniversalPluginResolver:
             target = c.nested_component.target_type if isinstance(c, ListComponent) else c.target_type
             new_registries[target] = {}
 
-        # 1. webclient パッケージ配下の全モジュールを自動走査
+        # webclient パッケージ配下の全モジュールを自動走査
         import webclient
 
         for module_info in pkgutil.walk_packages(webclient.__path__, webclient.__name__ + "."):
@@ -275,7 +276,7 @@ class UniversalPluginResolver:
             except ImportError:
                 continue
 
-        # 2. pip install された外部のサードパーティ拡張エントリーポイント（プラグイン）を自動走査
+        # pip install された外部のサードパーティ拡張エントリーポイント（プラグイン）を自動走査
         for group_name in plugin_groups:
             try:
                 for ep in entry_points(group=group_name):
@@ -294,8 +295,7 @@ class UniversalPluginResolver:
 
         for spec_type in registries:
             if issubclass(cls_obj, spec_type) and cls_obj is not spec_type:
-                # 💡 【1. @plugin_impl の厳格な義務付け一元チェック】
-                # サフィックス推論マジックは全廃。スキャンした完成品クラスにデコレータがなければ即座に例外爆破して起動を止める。
+                #  @plugin_impl の義務付けチェック
                 impl_meta = getattr(cls_obj, "__plugin_impl_meta__", None)
                 if not impl_meta:
                     raise TypeError(
@@ -303,7 +303,7 @@ class UniversalPluginResolver:
                         f"@plugin_impl デコレータが付与されていません。義務付けられています。"
                     )
 
-                # 💡 【2. コネクター具象クラスだった場合の、@dependency_module 義務付け＆オーディション】
+                # コネクター具象クラスだった場合の、@dependency_module 義務付け
                 if issubclass(cls_obj, ClientHttpConnector):
                     dep_meta = getattr(cls_obj, "__dependency_meta__", None)
                     if not dep_meta:
@@ -329,7 +329,6 @@ class UniversalPluginResolver:
                     if not is_env_valid:
                         return
 
-                # オーディションを完全にクリアしたプラグインを、アノテーションされた本物の名前を直撃してレジストリへ登録
                 registries[spec_type][impl_meta.value] = cls_obj
                 break
 

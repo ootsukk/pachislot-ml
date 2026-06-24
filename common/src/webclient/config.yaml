@@ -1,0 +1,12 @@
+webclient:
+  http_connector:
+    auto
+  filters:
+    context_attributes:
+      enabled: true
+    cookie_management:
+      enabled: true
+    retry:
+      enabled: true
+    logging:
+      enabled: true
