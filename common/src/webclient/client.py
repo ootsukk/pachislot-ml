@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any, Self, cast
 
 from webclient.base import (
     ClientHttpConnector,
+    ClientHttpRequest,
+    ClientHttpResponse,
     DefaultConnectorExchangeFunction,
     ExchangeFilterFunction,
     ExchangeFunction,
@@ -60,15 +62,15 @@ class WebClient:
         self._config: WebClientConfig = config if config is not None else WebClientConfig()
 
     @classmethod
-    def builder(cls) -> BaseWebClientBuilder:
-        return DefaultWebClientBuilder()
+    def builder(cls) -> WebClientBuilder:
+        return WebClientBuilder()
 
     @classmethod
-    def customize(cls, config: WebClientConfig) -> BaseWebClientBuilder:
-        return CustomizeWebClientBuilder(config)
+    def customize(cls, config: WebClientConfig) -> WebClientBuilder:
+        return WebClientBuilder(config)
 
-    def mutate(self) -> BaseWebClientBuilder:
-        builder = DefaultWebClientBuilder()
+    def mutate(self) -> WebClientBuilder:
+        builder = WebClientBuilder()
         builder.base_url(self._base_url)
         builder.api_version(self._api_version)
         builder.default_headers(self._default_headers)
@@ -158,30 +160,37 @@ class WebClient:
             await self._raw_connector_for_close.close()
 
 
-class BaseWebClientBuilder(ABC):
+class WebClientBuilder:
 
-    def __init__(self) -> None:
-        self._plugin_groups: list[str] = [ENTRY_POINT_TARGET]
-        self._base_url: str = ""
-        self._api_version: str = "v1"
-        self._default_headers: Mapping[str, str] = {}
-        self._default_cookies: Mapping[str, str] = {}
-        self._default_timeout: float | object | None = 30.0
-
-        # コード側から手動で直撃インジェクション（上書き指定）された生アセットを保持する優先プール
+    def __init__(self, config: WebClientConfig | None = None) -> None:
+        self._config = config or WebClientConfig()
+        self._overrides: dict[str, Any] = {}
         self._explicit_pool: dict[type[Any], Any] = {}
-        # HTTPクライアント（httpx等）をカスタマイズする格納庫
         self._client_extension_pool: dict[type[Any], Any] = {}
-
         self._context_attributes: list[tuple[ContextVar[object], str]] = []
-        self._is_mutated: bool = False
 
     def base_url(self, base_url: str, /) -> Self:
-        self._base_url = base_url
+        self._overrides["base_url"] = base_url
         return self
 
     def api_version(self, api_version: str, /) -> Self:
-        self._api_version = api_version
+        self._overrides["api_version"] = api_version
+        return self
+
+    def default_timeout(self, timeout: float, /) -> Self:
+        self._overrides["timeout"] = timeout
+        return self
+
+    def default_headers(self, headers: Mapping[str, str], /) -> Self:
+        current = dict(self._overrides.get("default_headers", self._config.default_headers))
+        current.update(headers)
+        self._overrides["default_headers"] = current
+        return self
+
+    def default_cookies(self, cookies: Mapping[str, str], /) -> Self:
+        current = dict(self._overrides.get("default_cookies", self._config.default_cookies))
+        current.update(cookies)
+        self._overrides["default_cookies"] = current
         return self
 
     def client_connector(self, connector: ClientHttpConnector, /) -> Self:
@@ -196,13 +205,16 @@ class BaseWebClientBuilder(ABC):
         self._explicit_pool[BodyDecoder] = decoder
         return self
 
-    def plugin_groups(self, groups: list[str], /) -> Self:
-        self._plugin_groups = list(groups)
+    def register_client_extension(self, type_key: type[Any], instance: Any, /) -> Self:
+        """HTTPXやcurl_cffi等の、足回りインフラ専用のSPI拡張契約（Customizer等）を装填します。"""
+        self._client_extension_pool[type_key] = instance
         return self
 
-    def filter(
-        self, filter_func: ExchangeFilterFunction, /, *, priority: int = 0, shortcut_name: str | None = None
-    ) -> Self:
+    def context_attribute(self, context_var: ContextVar[object], attribute_key: str, /) -> Self:
+        self._context_attributes.append((context_var, attribute_key))
+        return self
+
+    def filter(self, filter_func: ExchangeFilterFunction, /, *, priority: int = 100, shortcut_name: str | None = None) -> Self:
         if PrioritizedFilter not in self._explicit_pool:
             self._explicit_pool[PrioritizedFilter] = []
         self._explicit_pool[PrioritizedFilter].append(
@@ -210,60 +222,33 @@ class BaseWebClientBuilder(ABC):
         )
         return self
 
-    def filters(self, *filters: ExchangeFilterFunction) -> Self:
-        if PrioritizedFilter not in self._explicit_pool:
-            self._explicit_pool[PrioritizedFilter] = []
-        for f in filters:
-            self._explicit_pool[PrioritizedFilter].append(PrioritizedFilter(filter_func=f, priority=100))
+    def plugin_groups(self, groups: list[str], /) -> Self:
+        self._plugin_groups = list(groups)
         return self
 
-    def context_attribute(self, context_var: ContextVar[object], attribute_key: str, /) -> Self:
-        self._context_attributes.append((context_var, attribute_key))
-        return self
-
-    def default_headers(self, headers: Mapping[str, str], /) -> Self:
-        merged = dict(self._default_headers)
-        merged.update(headers)
-        self._default_headers = merged
-        return self
-
-    def default_cookies(self, cookies: Mapping[str, str], /) -> Self:
-        merged = dict(self._default_cookies)
-        merged.update(cookies)
-        self._default_cookies = merged
-        return self
-
-    def default_timeout(self, timeout: float, /) -> Self:
-        self._default_timeout = timeout
-        return self
-
-    def register_client_customizer(self, type_key: type[Any], instance: Any, /) -> Self:
-        """HTTP Clientの Customizer を登録する。"""
-        self._client_extension_pool[type_key] = instance
-        return self
-
-    @abstractmethod
     def build(self) -> WebClient:
-        pass
+        final_config = self._config
+        if self._overrides:
+            final_config = self._config.model_copy(update=self._overrides)
 
-    def _create_client_core(self, resolved_pool: dict[type[Any], Any], config: WebClientConfig) -> WebClient:
-        """子クラスの build() からキックされる、最終マージパイプライン"""
+        resolved_pool = UniversalPluginResolver.resolve_all(
+            config=final_config,
+            client_extension_pool=self._client_extension_pool,
+            explicit_pool=self._explicit_pool
+        )
 
-        connector = resolved_pool.get(ClientHttpConnector)
-        encoder = resolved_pool.get(BodyEncoder, DefaultBodyEncoder())
-        decoder = resolved_pool.get(BodyDecoder, DefaultBodyDecoder())
-        cookie_store = resolved_pool.get(CookieStore, MemoryCookieStore())
-        sorted_raw_filters = resolved_pool.get(PrioritizedFilter, [])
+        connector = resolved_pool[ClientHttpConnector]
+        encoder = resolved_pool[BodyEncoder]
+        decoder = resolved_pool[BodyDecoder]
 
-        # コンテキスト属性フィルターの動的合流
+        sorted_raw_filters = list(resolved_pool.get(PrioritizedFilter, []))
+
         if self._context_attributes:
             from webclient.filters.context_attributes_filter import ContextAttributesFilter
-
             for c_var, attr_key in self._context_attributes:
                 sorted_raw_filters.append(ContextAttributesFilter(c_var, attr_key))
 
-        # フィルターパイプラインの結合（後ろから順にネスト）
-        exchange_pipeline: ExchangeFunction = DefaultConnectorExchangeFunction(connector) # type: ignore
+        exchange_pipeline: ExchangeFunction = DefaultConnectorExchangeFunction(connector)
         for raw_filter in reversed(sorted_raw_filters):
             exchange_pipeline = FilteredExchangeFunction(raw_filter, exchange_pipeline)
 
@@ -271,56 +256,11 @@ class BaseWebClientBuilder(ABC):
             exchange_pipeline,
             encoder,
             decoder,
-            base_url=self._base_url,
-            api_version=self._api_version,
-            default_headers=self._default_headers,
-            default_cookies=self._default_cookies,
-            default_timeout=self._default_timeout,
+            base_url=final_config.base_url,
+            api_version=final_config.api_version,
+            default_headers=final_config.default_headers,
+            default_cookies=final_config.default_cookies,
+            default_timeout=final_config.timeout,
             raw_connector_for_close=connector,
-            cookie_store=cookie_store,
-            filters=sorted_raw_filters,
-            context_attributes=list(self._context_attributes),
+            config=final_config,
         )
-
-class DefaultWebClientBuilder(BaseWebClientBuilder):
-
-    def build(self) -> WebClient:
-
-        fake_empty_config = WebClientConfig(plugin_groups=self._plugin_groups)
-        resolved_pool = UniversalPluginResolver.resolve_all(
-            fake_empty_config,
-            client_extension_pool=self._client_extension_pool,
-            explicit_pool=self._explicit_pool,
-        )
-        return self._create_client_core(resolved_pool, fake_empty_config)
-
-
-class CustomizeWebClientBuilder(BaseWebClientBuilder):
-    """外部設定ファイルのパースデータ（WebClientConfig）をそのまま受け止め、
-    上書きのタイムラインをリゾルバーへ丸投げするクッション。
-    """
-    def __init__(self, config: WebClientConfig, /) -> None:
-        super().__init__()
-        self._config = config
-
-        # Config に書かれている明示的な基本パラメータを親クラスの不変セッター経由で同期
-        if config.plugin_groups:
-            self.plugin_groups(list(config.plugin_groups))
-        if config.base_url:
-            self.base_url(config.base_url)
-        if config.api_version:
-            self.api_version(config.api_version)
-        if config.timeout is not None:
-            self.default_timeout(config.timeout)
-        if config.default_headers:
-            self.default_headers(config.default_headers)
-        if config.default_cookies:
-            self.default_cookies(config.default_cookies)
-
-    def build(self) -> WebClient:
-        resolved_pool = UniversalPluginResolver.resolve_all(
-            self._config,
-            client_extension_pool=self._client_extension_pool,
-            explicit_pool=self._explicit_pool,
-        )
-        return self._create_client_core(resolved_pool, self._config)
