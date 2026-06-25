@@ -84,7 +84,7 @@ class WebClient:
             self._default_headers = default_headers if default_headers is not None else {}
             self._default_cookies = default_cookies if default_cookies is not None else {}
 
-        # 共通の実行パイプラインの動的組み立て
+        # 共通の実行パイプライン（マトリョーシカチェーン）の動的組み立て
         self._exchange_function = self._init_exchange_pipeline()
 
     def _init_exchange_pipeline(self) -> ExchangeFunction:

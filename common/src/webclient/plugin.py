@@ -122,6 +122,12 @@ class Component(ABC):
         self.strategy: NamingStrategy = FixedKey(key) if isinstance(key, str) else key
         self.mandatory = mandatory
 
+    @property
+    @abstractmethod
+    def plugin_spec_type(self) -> type:
+        """依存関係グラフの解析対象となる、プラグインの仕様（インターフェース）の型を返却します。"""
+        ...
+
     @abstractmethod
     def resolve_asset(
         self,
@@ -137,6 +143,10 @@ class Component(ABC):
 
 class FlatComponent(Component):
     """単一排他選択（FLAT）の入れ物を司る解決戦略オブジェクト"""
+
+    @property
+    def plugin_spec_type(self) -> type:
+        return self.target_type
 
     def resolve_asset(
         self,
@@ -162,13 +172,16 @@ class FlatComponent(Component):
 
         from webclient.resolver import UniversalPluginResolver
 
-        return UniversalPluginResolver._instantiate_flat_core(self, raw_section, key_name, type_pool, plugin_groups)
+        return UniversalPluginResolver.resolve_asset(self, raw_section, key_name, type_pool, plugin_groups)
 
 
 class ConfigPropertyComponent(Component):
     """Config 上にすでに実体化されているプロパティ（オブジェクトデータ）を、
     何も加工せずそのまま依存性プールへ横流し（マウント）するだけの自律戦略。
     """
+    @property
+    def plugin_spec_type(self) -> type:
+        return self.target_type
 
     def resolve_asset(
         self,
@@ -197,6 +210,11 @@ class ListComponent(Component):
         super().__init__(target_type, key, mandatory)
         self.nested_component = nested_component
         self.ordered = ordered
+
+    @property
+    def plugin_spec_type(self) -> type:
+        # リスト形式のコンポーネントは、内部に内包された要素の型が仕様型となる
+        return self.nested_component.target_type
 
     def resolve_asset(
         self,
