@@ -1,33 +1,30 @@
 from __future__ import annotations
 
-import dataclasses
 import importlib
 import inspect
 import logging
 import pkgutil
 import sys
 import types
-import typing
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import ClassVar, Final, Protocol, cast
-from pydantic import BaseModel
+from typing import ClassVar, Protocol, cast
 
 from container.component import Component
 from container.constants import ENTRY_POINT_SUFFIX
+from container.resolvable_type import ResolvableType
 
 _LOGGER = logging.getLogger("container.registry")
 
 
 @dataclass(frozen=True)
 class PluginDefinition[T]:
-    """特定のインターフェースに対するプラグイン実装のメタデータおよび依存関係を保持する定義書。"""
+    """特定のインターフェースに対するプラグイン実装のメタデータおよび依存関係を保持する不変の定義書。"""
 
     FIELD_SPEC_TYPE: ClassVar[str] = "spec_type"
     FIELD_IMPL_CLASS: ClassVar[str] = "impl_class"
     FIELD_PLUGIN_NAME: ClassVar[str] = "plugin_name"
     FIELD_PRIORITY: ClassVar[str] = "priority"
-    FIELD_CONFIG_CLASS: ClassVar[str] = "config_class"
     FIELD_CONSTRUCTOR_DEPS: ClassVar[str] = "constructor_dependencies"
     FIELD_DEPENDS_ON: ClassVar[str] = "depends_on"
 
@@ -38,8 +35,7 @@ class PluginDefinition[T]:
     impl_class: type[T]
     plugin_name: str
     priority: int = 100
-    config_class: type[object] | None = None
-    constructor_dependencies: dict[str, type[object]] = field(default_factory=dict)
+    constructor_dependencies: dict[str, type[object] | types.GenericAlias] = field(default_factory=dict)
     depends_on: tuple[type[object], ...] = field(default_factory=tuple)
 
 
@@ -67,9 +63,6 @@ class PluginRegistry:
                 plugin_info[name] = {
                     PluginDefinition.FIELD_IMPL_CLASS: f"{def_obj.impl_class.__module__}.{def_obj.impl_class.__name__}",
                     PluginDefinition.FIELD_PRIORITY: def_obj.priority,
-                    PluginDefinition.FIELD_CONFIG_CLASS: f"{def_obj.config_class.__module__}.{def_obj.config_class.__name__}"
-                    if def_obj.config_class
-                    else None,
                     PluginDefinition.FIELD_DEPENDS_ON: [f"{t.__module__}.{t.__name__}" for t in def_obj.depends_on],
                 }
             summary[spec_name] = plugin_info
@@ -87,15 +80,17 @@ class PluginIndexSerializer:
             spec_str = f"{spec_path.__module__}.{spec_path.__name__}"
             exported[spec_str] = {}
             for name, def_obj in slot.items():
+                serialized_deps: dict[str, str] = {}
+                for k, v in def_obj.constructor_dependencies.items():
+                    if isinstance(v, types.GenericAlias):
+                        serialized_deps[k] = f"{v.__origin__.__module__}.{v.__origin__.__name__}"
+                    else:
+                        serialized_deps[k] = f"{v.__module__}.{v.__name__}"
+
                 exported[spec_str][name] = {
                     PluginDefinition.FIELD_IMPL_CLASS: f"{def_obj.impl_class.__module__}.{def_obj.impl_class.__name__}",
                     PluginDefinition.FIELD_PRIORITY: def_obj.priority,
-                    PluginDefinition.FIELD_CONFIG_CLASS: f"{def_obj.config_class.__module__}.{def_obj.config_class.__name__}"
-                    if def_obj.config_class
-                    else None,
-                    PluginDefinition.FIELD_CONSTRUCTOR_DEPS: {
-                        k: f"{v.__module__}.{v.__name__}" for k, v in def_obj.constructor_dependencies.items()
-                    },
+                    PluginDefinition.FIELD_CONSTRUCTOR_DEPS: serialized_deps,
                     PluginDefinition.FIELD_DEPENDS_ON: [f"{t.__module__}.{t.__name__}" for t in def_obj.depends_on],
                 }
         return exported
@@ -110,8 +105,8 @@ class PluginClassDetector(Protocol):
 class InternalPackageDetector:
     """指定された複数の内部パッケージ空間群を巡回し配下のモジュールからクラスを検出するデテクター。"""
 
-    def __init__(self, root_package_names: Sequence[str], /) -> None:
-        self._root_package_names = root_package_names
+    def __init__(self, package_names: Sequence[str], /) -> None:
+        self._root_package_names = package_names
 
     def detect(self) -> Iterable[type[object]]:
         for root_package_name in self._root_package_names:
@@ -192,11 +187,9 @@ class CacheIndexDefinitionReader:
             for name, def_data in slot_data.items():
                 try:
                     impl_class = self._resolve_type_path(str(def_data.get(PluginDefinition.FIELD_IMPL_CLASS)))
-                    config_class_path = def_data.get(PluginDefinition.FIELD_CONFIG_CLASS)
-                    config_class = self._resolve_type_path(str(config_class_path)) if config_class_path else None
 
                     raw_deps = def_data.get(PluginDefinition.FIELD_CONSTRUCTOR_DEPS)
-                    dependencies: dict[str, type[object]] = {}
+                    dependencies: dict[str, type[object] | types.GenericAlias] = {}
                     if isinstance(raw_deps, Mapping):
                         for param_name, type_path in raw_deps.items():
                             dependencies[str(param_name)] = self._resolve_type_path(str(type_path))
@@ -212,7 +205,6 @@ class CacheIndexDefinitionReader:
                         impl_class=impl_class,
                         plugin_name=name,
                         priority=cast(int, def_data.get(PluginDefinition.FIELD_PRIORITY, 100)),
-                        config_class=config_class,
                         constructor_dependencies=dependencies,
                         depends_on=tuple(depends_on_list),
                     )
@@ -263,25 +255,17 @@ class DynamicScanDefinitionReader:
         for spec_type, slot in merged_raw.items():
             for name, impl_class in slot.items():
                 sig = inspect.signature(impl_class)
-                dependencies: dict[str, type[object]] = {}
-                detected_config_class: type[object] | None = None
+                dependencies: dict[str, type[object] | types.GenericAlias] = {}
 
                 for param_name, param in sig.parameters.items():
                     if param_name in ("self", "cls"):
                         continue
 
-                    p_type = self._extract_core_type(param.annotation)
-                    if p_type is None:
+                    resolvable = ResolvableType.from_annotation(param.annotation)
+                    if resolvable is None:
                         continue
 
-                    dependencies[param_name] = p_type
-
-                    is_pydantic_model = issubclass(p_type, BaseModel)
-                    is_std_dataclass = dataclasses.is_dataclass(p_type)
-                    is_custom_type = p_type.__module__ != "builtins" and p_type not in self._spec_types
-
-                    if is_pydantic_model or is_std_dataclass or is_custom_type:
-                        detected_config_class = p_type
+                    dependencies[param_name] = resolvable.raw_type
 
                 priority = 100
                 depends_on_tuple: tuple[type[object], ...] = ()
@@ -302,7 +286,6 @@ class DynamicScanDefinitionReader:
                     impl_class=impl_class,
                     plugin_name=name,
                     priority=priority,
-                    config_class=detected_config_class,
                     constructor_dependencies=dependencies,
                     depends_on=depends_on_tuple,
                 )
@@ -350,30 +333,6 @@ class DynamicScanDefinitionReader:
 
             registries[spec_type][key] = cls_obj
 
-    @classmethod
-    def _extract_core_type(cls, annotation: object, /) -> type[object] | None:
-        origin = typing.get_origin(annotation)
-        args = typing.get_args(annotation)
-
-        if origin is typing.Union or isinstance(annotation, types.UnionType):
-            for arg in args:
-                if arg is type(None):
-                    continue
-                unwrapped = cls._extract_core_type(arg)
-                if unwrapped is not None:
-                    return unwrapped
-            return None
-
-        if origin is not None:
-            if isinstance(origin, type):
-                return origin
-            return None
-
-        if isinstance(annotation, type):
-            return annotation
-
-        return None
-
 
 class PluginScanner:
     """複数パッケージのマルチリーダ戦略を切り替えて起動しカタログオブジェクトをビルドする主走査クラス。"""
@@ -395,7 +354,6 @@ class PluginScanner:
         for c in components:
             if hasattr(c, "plugin_spec_type"):
                 self._spec_types.add(c.plugin_spec_type)
-            self._spec_types.add(c.target_type)
 
         for t in ignored_types:
             self._spec_types.add(t)

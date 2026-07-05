@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 import types
-from typing import Protocol
+from typing import Any, Final, Protocol, cast
 
 from container.constants import (
     YAML_KEY_ENABLED,
@@ -13,6 +14,9 @@ from container.constants import (
     YAML_VAL_AUTO,
     ComponentScope,
 )
+from container.resolvable_type import ResolvableType
+
+_SNAKE_CASE_PATTERN: Final[re.Pattern[str]] = re.compile(r"(?<!^)(?=[A-Z])")
 
 
 class NamingStrategy(Protocol):
@@ -26,7 +30,7 @@ class FixedKeyStrategy:
     """明示的に指定された固定文字列を最優先で返す具象命名戦略。"""
 
     def __init__(self, key: str, /) -> None:
-        self._key = key
+        self._key: Final[str] = key
 
     def get_key(self, cls_obj: type[object] | None = None, dynamic_name: str | None = None) -> str | None:
         if dynamic_name == YAML_VAL_AUTO:
@@ -47,9 +51,9 @@ class PluginNameKeyStrategy:
             return dynamic_name
 
         if cls_obj is not None and hasattr(cls_obj, "__plugin_impl_meta__"):
-            meta: object = getattr(cls_obj, "__plugin_impl_meta__")  # noqa: B009
+            meta: object = getattr(cls_obj, "__plugin_impl_meta__")
             if hasattr(meta, "value"):
-                return str(getattr(meta, "value"))  # noqa: B009
+                return str(getattr(meta, "value"))
         return None
 
     def get_options_key(self, cls_obj: type[object] | None = None, dynamic_name: str | None = None) -> str | None:
@@ -67,8 +71,7 @@ class ClassNameAutomaticKeyStrategy:
     def get_key(self, cls_obj: type[object] | None = None, dynamic_name: str | None = None) -> str | None:
         if cls_obj is not None:
             name = cls_obj.__name__
-            snake_name = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
-            return snake_name
+            return _SNAKE_CASE_PATTERN.sub("_", name).lower()
         return None
 
     def get_options_key(self, cls_obj: type[object] | None = None, dynamic_name: str | None = None) -> str | None:
@@ -86,7 +89,7 @@ class ChainNamingStrategy:
         strategies.append(PluginNameKeyStrategy())
         strategies.append(ClassNameAutomaticKeyStrategy())
 
-        self._strategies: Sequence[NamingStrategy] = strategies
+        self._strategies: Final[Sequence[NamingStrategy]] = strategies
 
     def get_key(self, cls_obj: type[object] | None = None, dynamic_name: str | None = None) -> str:
         for strategy in self._strategies:
@@ -103,7 +106,7 @@ class ChainNamingStrategy:
         return ""
 
 
-def naming_chain(fixed_key_str: str) -> NamingStrategy:
+def naming_chain(fixed_key_str: str, /) -> NamingStrategy:
     return ChainNamingStrategy(fixed_key_str)
 
 
@@ -114,13 +117,16 @@ class Component[T](ABC):
         self,
         target_type: type[T] | types.GenericAlias,
         naming_strategy: NamingStrategy,
+        /,
+        *,
         mandatory: bool = True,
         scope: ComponentScope = ComponentScope.SINGLETON,
     ) -> None:
-        self._target_type = target_type
-        self._naming_strategy = naming_strategy
-        self._mandatory = mandatory
-        self._scope = scope
+        self._target_type: Final[type[T] | types.GenericAlias] = target_type
+        self._resolvable: Final[ResolvableType] = ResolvableType(target_type)
+        self._naming_strategy: Final[NamingStrategy] = naming_strategy
+        self._mandatory: Final[bool] = mandatory
+        self._scope: Final[ComponentScope] = scope
 
     @property
     def target_type(self) -> type[T] | types.GenericAlias:
@@ -136,12 +142,7 @@ class Component[T](ABC):
 
     @property
     def key(self) -> str:
-        if isinstance(self._target_type, types.GenericAlias):
-            core_type = getattr(self._target_type, "__origin__", self._target_type)
-        else:
-            core_type = self._target_type
-
-        resolved = self._naming_strategy.get_key(core_type)
+        resolved = self._naming_strategy.get_key(self._resolvable.origin)
         return resolved if resolved is not None else ""
 
     @property
@@ -156,11 +157,14 @@ class Component[T](ABC):
 class InstanceComponent[T](Component[T]):
     """あらかじめ生成された特定の具象インスタンスを直接登録するための仕様定義書。"""
 
-    def __init__(self, target_type: type[T], instance: T) -> None:
+    def __init__(self, target_type: type[T], instance: T, /) -> None:
         super().__init__(
-            target_type, naming_strategy=ChainNamingStrategy(""), mandatory=True, scope=ComponentScope.SINGLETON
+            target_type,
+            ChainNamingStrategy(""),
+            mandatory=True,
+            scope=ComponentScope.SINGLETON,
         )
-        self._instance = instance
+        self._instance: Final[T] = instance
 
     @property
     def instance(self) -> T:
@@ -168,15 +172,15 @@ class InstanceComponent[T](Component[T]):
 
     @property
     def plugin_spec_type(self) -> type[object]:
-        return self.target_type
+        return self._resolvable.origin
 
 
 class PropertyComponent[T](Component[T]):
-    """構成ファイルからの単純なプロパティ値注入を定義するための仕様定義書。"""
+    """構成ファイルからの単純なプロパティ値注入、または構造化設定オブジェクトの生成を定義する仕様定義書。"""
 
     @property
     def plugin_spec_type(self) -> type[object]:
-        return self.target_type
+        return self._resolvable.origin
 
 
 class PluginComponent[T](Component[T]):
@@ -184,7 +188,7 @@ class PluginComponent[T](Component[T]):
 
     @property
     def plugin_spec_type(self) -> type[object]:
-        return self.target_type
+        return self._resolvable.origin
 
 
 class PluginListComponent[R, T](Component[R]):
@@ -195,13 +199,15 @@ class PluginListComponent[R, T](Component[R]):
         target_type: type[R],
         naming_strategy: NamingStrategy,
         nested_component: Component[T],
+        /,
+        *,
         ordered: bool = False,
         mandatory: bool = True,
         scope: ComponentScope = ComponentScope.SINGLETON,
     ) -> None:
-        super().__init__(target_type, naming_strategy=naming_strategy, mandatory=mandatory, scope=scope)
-        self._nested_component = nested_component
-        self._ordered = ordered
+        super().__init__(target_type, naming_strategy, mandatory=mandatory, scope=scope)
+        self._nested_component: Final[Component[T]] = nested_component
+        self._ordered: Final[bool] = ordered
 
     @property
     def nested_component(self) -> Component[T]:
@@ -215,23 +221,54 @@ class PluginListComponent[R, T](Component[R]):
     def plugin_spec_type(self) -> type[object]:
         return self.nested_component.plugin_spec_type
 
+class ComponentRegistry:
+    """コンポーネント定義の集合体であり、検索・解決戦略を統治する不変の値オブジェクト"""
+
+    def __init__(self, components: Sequence[Component[object]], /) -> None:
+        """シーケンスを直接受け取り、内部ルックアップマップを安全にカプセル化して構築"""
+        components_map: dict[type[object] | types.GenericAlias, Component[object]] = {}
+        spec_components_map: dict[type[object], Component[object]] = {}
+
+        for c in components:
+            components_map[c.target_type] = c
+
+            spec_type = getattr(c, "plugin_spec_type", None)
+            if isinstance(spec_type, type):
+                spec_components_map[spec_type] = c
+
+        self._components_map: Final[Mapping[type[object] | types.GenericAlias, Component[object]]] = components_map
+        self._spec_components_map: Final[Mapping[type[object], Component[object]]] = spec_components_map
+
+    def lookup(
+        self, target_type: type[object] | types.GenericAlias, plugin_name: str | None = None, /
+    ) -> Component[object] | None:
+        """指定されたターゲット型およびプラグイン名に基づきコンポーネント定義を高速探索"""
+        if target_type in self._components_map:
+            return self._components_map[target_type]
+
+        if plugin_name and target_type in self._spec_components_map:
+            return self._spec_components_map[target_type] # type: ignore
+
+        return None
 
 class PluginSetting:
-    """生の設定データのトポロジーをカプセル化し一貫したドメインセマンティクスを提供する不変の値オブジェクト。"""
+    """生の設定データのトポロジーをカプセル化し、一貫したドメインセマンティクスを提供する不変の値オブジェクト。"""
 
     def __init__(
         self,
         raw_value: object,
         strategy: NamingStrategy,
+        /,
+        *,
         options_key: str | None = None,
     ) -> None:
-        self._raw_value = raw_value
-        self._strategy = strategy
+        self._raw_value: Final[object] = raw_value
+        self._strategy: Final[NamingStrategy] = strategy
 
         match raw_value:
             case None:
-                self._plugin_name = YAML_VAL_AUTO
-                self._enabled = True
+                self._plugin_name: str = YAML_VAL_AUTO
+                self._enabled: bool = True
                 self._options_dict: dict[str, object] = {}
             case str() as s:
                 resolved_name = strategy.get_key(dynamic_name=s)
