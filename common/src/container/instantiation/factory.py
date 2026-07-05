@@ -7,23 +7,23 @@ from typing import Final, Protocol
 
 from pydantic import BaseModel
 
-from container.component import (
+from container.common.exceptions import ComponentInstantiationError
+from container.core.cache import ComponentId
+from container.definitions.component import (
     Component,
     InstanceComponent,
     PluginComponent,
     PluginListComponent,
-    PluginSetting,
     PropertyComponent,
 )
-from container.context import ComponentId
-from container.exceptions import ComponentInstantiationError
-from container.resolvable_type import ResolvableType
-from container.resolver import ConstructorResolver
-from container.validator import PluginEligibilityValidator
+from container.definitions.descriptor import PluginDescriptor
+from container.definitions.resolvable import ResolvableType
+from container.instantiation.resolver import ConstructorResolver
+from container.instantiation.validator import PluginEligibilityValidator
 
 if typing.TYPE_CHECKING:
-    from container.context import ResolutionSession
-    from container.register import PluginDefinition
+    from container.core.context import ResolutionSession
+    from container.definitions.registry import PluginDefinition
 
 
 class ComponentFactory[C: Component[object]](Protocol):
@@ -44,7 +44,7 @@ class PluginFactory(ComponentFactory[PluginComponent[object]], Protocol):
     """単一プラグインの直接実体化および PluginComponent の解決能力を規定するプロトコル。"""
 
     def create_instance_direct(
-        self, definition: PluginDefinition[object], setting: PluginSetting, session: ResolutionSession, /
+        self, definition: PluginDefinition[object], setting: PluginDescriptor, session: ResolutionSession, /
     ) -> object | None: ...
 
 
@@ -55,7 +55,7 @@ class CollectionFactory(ComponentFactory[PluginListComponent[object, object]], P
         self,
         definitions: Sequence[PluginDefinition[object]],
         raw_config: Mapping[str, object],
-        resolvable: ResolvableType,
+        resolvable: ResolvableType[typing.Any],
         session: ResolutionSession,
         naming_strategy: object,
         /,
@@ -87,7 +87,6 @@ class ConfigInstanceFactory:
     """固有メソッド名 'deserialize' による型安全なデシリアライズ責任と、共通インターフェースを両立する具象ファクトリ。"""
 
     def deserialize(self, config_class: type[object], payload: Mapping[str, object], /) -> object:
-        """【固有API】コンテナ外部からも完全に独立して利用可能な、純粋なデシリアライズ機能。"""
         if issubclass(config_class, BaseModel):
             try:
                 return config_class.model_validate(payload)
@@ -111,7 +110,6 @@ class ConfigInstanceFactory:
     def create_instance(
         self, component: PropertyComponent[object], session: ResolutionSession, raw_config: Mapping[str, object], /
     ) -> object | None:
-        """【共通API】ComponentFactory プロトコルに対する適合実装。内部で固有APIへデリゲーション。"""
         key = component.key
         if key not in raw_config:
             return None
@@ -144,9 +142,8 @@ class PluginInstanceFactory:
         self._instantiation_strategy: Final[DefaultInstantiationStrategy] = DefaultInstantiationStrategy()
 
     def create_instance_direct(
-        self, definition: PluginDefinition[object], setting: PluginSetting, session: ResolutionSession, /
+        self, definition: PluginDefinition[object], setting: PluginDescriptor, session: ResolutionSession, /
     ) -> object | None:
-        """【固有API】単一のプラグイン定義メタデータから物理実体化を行う、高凝集な生成機能。"""
         if not self._validator.validate(definition, setting):
             return None
 
@@ -156,13 +153,12 @@ class PluginInstanceFactory:
     def create_instance(
         self, component: PluginComponent[object], session: ResolutionSession, raw_config: Mapping[str, object], /
     ) -> object | None:
-        """【共通API】ComponentFactory プロトコルに対する適合実装。内部で固有APIへデリゲーション。"""
         spec_type = component.plugin_spec_type
         definitions = session.resolve_plugin_stream(spec_type)
 
         raw_payload = raw_config.get(component.key)
         plugin_name_override = session.requested_plugin_name
-        setting = PluginSetting(raw_payload, component.naming_strategy, options_key=plugin_name_override)
+        setting = PluginDescriptor(raw_payload, component.naming_strategy, options_key=plugin_name_override)
         target_plugin_name = plugin_name_override if plugin_name_override else setting.plugin_name
 
         target_def = None
@@ -191,18 +187,17 @@ class CollectionInstanceFactory:
         self,
         definitions: Sequence[PluginDefinition[object]],
         raw_config: Mapping[str, object],
-        resolvable: ResolvableType,
+        resolvable: ResolvableType[typing.Any],
         session: ResolutionSession,
         naming_strategy: object,
         /,
     ) -> object:
-        """【固有API】整列済み定義カタログのシーケンスから反復生成とコレクション型変換を行う機能。"""
         instances: list[object] = []
         strategy_adapter = typing.cast(typing.Any, naming_strategy)
 
         for definition in definitions:
             raw_payload = raw_config.get(definition.plugin_name)
-            setting = PluginSetting(raw_payload, strategy_adapter)
+            setting = PluginDescriptor(raw_payload, strategy_adapter)
 
             if not setting.enabled:
                 continue
@@ -237,7 +232,6 @@ class CollectionInstanceFactory:
         raw_config: Mapping[str, object],
         /,
     ) -> object | None:
-        """【共通API】ComponentFactory プロトコルに対する適合実装。内部で固有APIへデリゲーション。"""
         definitions = session.resolve_plugin_stream(component.plugin_spec_type)
         resolvable = ResolvableType(component.target_type)
         return self.create_collection(definitions, raw_config, resolvable, session, component.naming_strategy)

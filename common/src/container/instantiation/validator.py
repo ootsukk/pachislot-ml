@@ -3,14 +3,14 @@ from __future__ import annotations
 import typing
 
 if typing.TYPE_CHECKING:
-    from container.component import PluginSetting
-    from container.register import PluginDefinition
+    from container.definitions.descriptor import PluginDescriptor
+    from container.definitions.registry import PluginDefinition
 
 
 class PluginEligibilityValidator:
     """プラグイン実装クラスの装飾規約および環境適合性を専門に検証するバリデーター。"""
 
-    def validate(self, definition: PluginDefinition[object], setting: PluginSetting, /) -> bool:
+    def validate(self, definition: PluginDefinition[object], setting: PluginDescriptor, /) -> bool:
         impl_class = definition.impl_class
         plugin_name = setting.plugin_name
 
