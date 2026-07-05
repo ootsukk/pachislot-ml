@@ -8,8 +8,9 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Final, Protocol, cast, runtime_checkable
 
-from container.component import ChainNamingStrategy, Component, ComponentRegistry
+from container.component import ChainNamingStrategy, Component
 from container.constants import ComponentScope
+from container.container import Container
 from container.exceptions import CircularDependencyError, ComponentInstantiationError
 from container.factory import (
     CollectionFactory,
@@ -18,7 +19,7 @@ from container.factory import (
     InstanceComponentFactory,
     PluginFactory,
 )
-from container.interfaces import ApplicationContext, BeanPostProcessor, Initializable
+from container.interfaces import BeanPostProcessor, Initializable
 from container.resolvable_type import ResolvableType
 
 if typing.TYPE_CHECKING:
@@ -41,21 +42,26 @@ class CacheKey:
 
 
 @dataclass(frozen=True)
-class BeanName:
-    """基本型強迫(Primitive Obsession)を排除し、識別名セマンティクスを統治する不変値オブジェクト [Robust Python]"""
+class ComponentId:
+    """基本型強迫(Primitive Obsession)を排除し、識別名セマンティクスを統治する不変値オブジェクト"""
 
     value: Final[str]
 
     @classmethod
-    def from_context(cls, component: Component[object], cache_key: CacheKey, /) -> BeanName:
-        """型トポロジーとメタデータから、規約に準拠したBeanNameを一意に鋳造するファクトリ [Effective Python Item 77]"""
+    def from_context(cls, component: Component[object], cache_key: CacheKey, /) -> ComponentId:
+        """型トポロジーとメタデータから、規約に準拠したComponentを一意に鋳造するファクトリ"""
         match cache_key.target_type:
             case types.GenericAlias() as alias:
-                resolved_value = (
-                    component.key
-                    if component.key
-                    else f"{alias.__origin__.__name__.lower()}_of_{alias.__args__[0].__name__.lower()}"
-                )
+                if component.key:
+                    resolved_value = component.key
+                else:
+                    origin_name = getattr(alias.__origin__, "__name__", str(alias.__origin__)).lower()
+                    if alias.__args__:
+                        arg_obj = alias.__args__[0]
+                        arg_name = getattr(arg_obj, "__name__", str(arg_obj)).lower()
+                    else:
+                        arg_name = "unknown"
+                    resolved_value = f"{origin_name}_of_{arg_name}"
             case type() as t:
                 resolved_value = (
                     f"{t.__name__.lower()}:{cache_key.plugin_name}"
@@ -69,7 +75,6 @@ class BeanName:
         return cls(resolved_value)
 
     def __str__(self) -> str:
-        """既存の文字列ベースのインフラやログとの透過的な互換性を保証"""
         return self.value
 
 
@@ -147,7 +152,7 @@ class ResolutionSession:
     def resolve_plugin_stream(self, spec_type: type[object], /) -> list[PluginDefinition[object]]:
         return self._container._instantiation_engine.resolve_plugin_stream(spec_type)
 
-    def apply_lifecycle_pipeline(self, instance: object, bean_name: BeanName, /) -> object:
+    def apply_lifecycle_pipeline(self, instance: object, bean_name: ComponentId, /) -> object:
         """【型安全化】シグネチャをプレイン文字列からBeanName不変値オブジェクトへ変更"""
         return self._container._instantiation_engine.apply_pipeline(instance, bean_name)
 
@@ -219,7 +224,7 @@ class ComponentInstantiationEngine:
         definitions = self.registry.get_all_definitions(spec_type)
         return sorted(definitions, key=lambda d: d.priority, reverse=True)
 
-    def apply_pipeline(self, instance: object, bean_name: BeanName, /) -> object:
+    def apply_pipeline(self, instance: object, bean_name: ComponentId, /) -> object:
         """【型安全化】BPP適用境界において、BeanNameオブジェクトから透過的に値を取り出してパイプラインを実行"""
         current_bean = instance
         name_str = bean_name.value
@@ -256,7 +261,7 @@ class ComponentInstantiationEngine:
         self, component: Component[object], cache_key: CacheKey, actual_key: CacheKey, session: ResolutionSession, /
     ) -> object:
         """【複雑性解消】命名ロジックをBeanName値オブジェクトへ完全委譲し、自身の責務を実体化オーケストレーションへ集約"""
-        bean_name = BeanName.from_context(component, cache_key)
+        bean_name = ComponentId.from_context(component, cache_key)
 
         if component.scope == ComponentScope.TRANSIENT:
             raw_inst = self.instantiate(component, session)
@@ -272,75 +277,3 @@ class ComponentInstantiationEngine:
             return processed_bean
 
         return session.execute_with_lock(cache_key, factory_action)
-
-
-class Container(ApplicationContext):
-    """シングルトンキャッシュとスレッド安全なルックアップ、および破棄ライフサイクルに特化したランタイムコア"""
-
-    def __init__(
-        self,
-        registry_data: ComponentRegistry,
-        registry: PluginRegistry,
-        raw_config: Mapping[str, object],
-        post_processors: Sequence[BeanPostProcessor],
-        factory_registry: ComponentFactoryRegistry,
-        /,
-    ) -> None:
-        self._registry_data: Final[ComponentRegistry] = registry_data
-        self._exit_stack: Final[contextlib.ExitStack] = contextlib.ExitStack()
-        self._cache: Final[SingletonBeanCache] = SingletonBeanCache()
-
-        self._instantiation_engine: Final[ComponentInstantiationEngine] = ComponentInstantiationEngine(
-            registry,
-            raw_config,
-            factory_registry,
-            post_processors,
-        )
-
-    def get_instance[T](self, target_type: type[T] | types.GenericAlias, /, *, name: str | None = None) -> T:
-        return self._get_internal_instance(target_type, set(), plugin_name=name)
-
-    def get_instances_by_spec[T](self, spec_type: type[T], /) -> Sequence[T]:
-        session = ResolutionSession(self, set())
-        resolvable = ResolvableType[T](list[spec_type])
-        return self._instantiation_engine.instantiate_dynamic_collection(resolvable, session)
-
-    def _get_internal_instance[T](
-        self,
-        target_type: type[T] | types.GenericAlias,
-        stack: set[CacheKey],
-        *,
-        plugin_name: str | None = None,
-    ) -> T:
-        cache_key = CacheKey(target_type, plugin_name)
-
-        if (cached := self._cache.get(cache_key)) is not None:
-            return cast(T, cached)
-
-        component = self._registry_data.lookup(target_type, plugin_name)
-        if component is None and isinstance(target_type, types.GenericAlias):
-            session = ResolutionSession(self, stack, plugin_name)
-            resolvable_lookup = ResolvableType[typing.Any](target_type)
-            dynamic_collection = self._instantiation_engine.instantiate_dynamic_collection(resolvable_lookup, session)
-            self._cache.put_if_absent(cache_key, dynamic_collection)
-            return cast(T, dynamic_collection)
-
-        if component is None:
-            if plugin_name:
-                return self._get_internal_instance(target_type, stack, plugin_name=None)
-            raise ComponentInstantiationError(f"未登録型: {target_type}")
-
-        session = ResolutionSession(self, stack, plugin_name)
-
-        result = self._instantiation_engine.resolve_scoped_instance(
-            component, cache_key, CacheKey(component.target_type, plugin_name), session
-        )
-        return cast(T, result)
-
-    def _register_resource(self, instance: object, /) -> None:
-        if isinstance(instance, Closable):
-            self._exit_stack.callback(instance.close)
-
-    def close(self) -> None:
-        self._cache.clear()
-        self._exit_stack.close()

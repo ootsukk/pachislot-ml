@@ -166,31 +166,23 @@ class FilteredExchangeFunction(ExchangeFunction):
 # =====================================================================
 
 class Configurable[T]:
-    """コンポーネント自身が、対応する設定（Config）の解決・抽出に責任を持つための抽象基底クラス"""
+    """コンポーネント自身が、対応する設定（Config）の解決・抽出に責任を持つための抽象基底クラス。"""
 
     @classmethod
-    def create_config(cls, source: Any, /, *, type_pool: dict[type[Any], Any] | None = None) -> T:
-        config_class = extract_config_type(cls)
+    def get_config_type(cls) -> type | None:
+        orig_bases = getattr(cls, "__orig_bases__", [])
+        for base in orig_bases:
+            origin = getattr(base, "__origin__", None)
+            if origin is not None and getattr(origin, "__name__", None) == "Configurable":
+                args = getattr(base, "__args__", None)
+                if args and isinstance(args[0], type):
+                    return args[0]
+        return None
+
+    @classmethod
+    def create_config(cls) -> T:
+        config_class = cls.get_config_type()
         if config_class is None:
             raise RuntimeError(f"クラス '{cls.__name__}' のジェネリクスから設定型を逆引き抽出できませんでした。")
 
-        if isinstance(source, config_class):
-            return source
-
-        if dataclasses.is_dataclass(source):
-            for fld in dataclasses.fields(source):
-                val = getattr(source, fld.name, None)
-                if isinstance(val, config_class):
-                    return cast(T, val)
-
-        if type_pool:
-            if config_class in type_pool:
-                return cast(T, type_pool[config_class])
-            for val in type_pool.values():
-                if isinstance(val, config_class):
-                    return cast(T, val)
-
-        try:
-            return cast(T, config_class())
-        except Exception as err:
-            raise RuntimeError(f"型 [{config_class.__name__}] のオブジェクト自動抽出に失敗しました。") from err
+        return config_class()

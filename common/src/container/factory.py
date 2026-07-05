@@ -15,7 +15,7 @@ from container.component import (
     PluginSetting,
     PropertyComponent,
 )
-from container.context import BeanName
+from container.context import ComponentId
 from container.exceptions import ComponentInstantiationError
 from container.resolvable_type import ResolvableType
 from container.resolver import ConstructorResolver
@@ -211,7 +211,7 @@ class CollectionInstanceFactory:
             if inst is None:
                 continue
 
-            bean_name = BeanName(definition.plugin_name)
+            bean_name = ComponentId(definition.plugin_name)
             processed_element = session.apply_lifecycle_pipeline(inst, bean_name)
             instances.append(processed_element)
 

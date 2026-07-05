@@ -15,7 +15,7 @@ class Initializable(Protocol):
 class ApplicationContext(Protocol):
     """コンテナ内アセットに対する読み取り専用の最上位抽象境界インターフェース。"""
 
-    def get_instance[T](self, target_type: type[T] | types.GenericAlias, /, *, name: str | None = None) -> T: ...
+    def resolve[T](self, target_type: type[T] | types.GenericAlias, /, *, name: str | None = None) -> T: ...
 
 
 class InstantiationStrategy(Protocol):

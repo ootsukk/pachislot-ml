@@ -164,6 +164,6 @@ class ApplicationContextBuilder:
         # トポロジカルソート順に従い、シングルトンの先行実体化（Eager Initialization）を型安全に完遂
         for node in perfectly_ordered_nodes:
             if registry_data.lookup(node) is not None:
-                container.get_instance(node)
+                container.resolve(node)
 
         return container

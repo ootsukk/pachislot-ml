@@ -8,5 +8,8 @@ webclient:
       enabled: true
     retry:
       enabled: true
+      retry_options:
+        max_attempts: 5
+        backoff_factor: 0.5
     logging:
       enabled: true
