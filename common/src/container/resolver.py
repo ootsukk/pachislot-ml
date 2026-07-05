@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import typing
+
 from container.exceptions import ComponentInstantiationError
 
 if typing.TYPE_CHECKING:

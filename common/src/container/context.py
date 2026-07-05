@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Final, Protocol, cast, runtime_checkable
 
-from container.component import Component, ComponentRegistry, ChainNamingStrategy
+from container.component import ChainNamingStrategy, Component, ComponentRegistry
 from container.constants import ComponentScope
 from container.exceptions import CircularDependencyError, ComponentInstantiationError
 from container.factory import (

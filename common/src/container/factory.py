@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import dataclasses
-import types
 import typing
 from collections.abc import Mapping, Sequence
 from typing import Final, Protocol
+
 from pydantic import BaseModel
 
 from container.component import (
     Component,
     InstanceComponent,
-    PropertyComponent,
     PluginComponent,
     PluginListComponent,
     PluginSetting,
+    PropertyComponent,
 )
 from container.context import BeanName
 from container.exceptions import ComponentInstantiationError

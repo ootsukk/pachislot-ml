@@ -18,7 +18,7 @@ class PluginEligibilityValidator:
             raise TypeError(f"具象実装クラス '{impl_class.__name__}' に必要なアノテーションメタデータが存在しません。")
 
         dep_meta = getattr(impl_class, "__dependency_meta__", None)
-        is_satisfied = bool(getattr(dep_meta, "check_satisfied")()) if dep_meta else True
+        is_satisfied = bool(dep_meta.check_satisfied()) if dep_meta else True
 
         if plugin_name and plugin_name != "auto":
             if not is_satisfied:

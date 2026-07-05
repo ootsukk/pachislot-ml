@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import contextlib
 import graphlib
 import types
 import typing
 from collections.abc import Mapping, Sequence
-from typing import Final, cast
+from typing import Final
 
 from container.component import Component, ComponentRegistry, PluginSetting
 from container.context import CacheKey, ComponentFactoryRegistry, Container
-from container.exceptions import ComponentInstantiationError
-from container.factory import CollectionFactory, CollectionInstanceFactory, ConfigFactory, ConfigInstanceFactory, PluginFactory, PluginInstanceFactory
+from container.factory import CollectionInstanceFactory, ConfigInstanceFactory, PluginInstanceFactory
 from container.interfaces import ApplicationContext, BeanPostProcessor
 from container.register import PluginRegistry, PluginScanner
 from container.resolvable_type import ResolvableType
@@ -45,7 +43,7 @@ class DependencyGraphSorter:
 
         # 具象レジストリ情報を走査してエッジを確定
         for comp in self._components:
-            if hasattr(comp, "plugin_spec_type") and (spec_type := getattr(comp, "plugin_spec_type")) is not None:
+            if hasattr(comp, "plugin_spec_type") and (spec_type := comp.plugin_spec_type) is not None:
                 if not isinstance(spec_type, type):
                     continue
 

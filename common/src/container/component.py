@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+import types
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
-import types
-from typing import Any, Final, Protocol, cast
+from typing import Final, Protocol
 
 from container.constants import (
     YAML_KEY_ENABLED,
@@ -51,9 +50,9 @@ class PluginNameKeyStrategy:
             return dynamic_name
 
         if cls_obj is not None and hasattr(cls_obj, "__plugin_impl_meta__"):
-            meta: object = getattr(cls_obj, "__plugin_impl_meta__")
+            meta: object = getattr(cls_obj, "__plugin_impl_meta__", None)
             if hasattr(meta, "value"):
-                return str(getattr(meta, "value"))
+                return str(getattr(meta, "value", None))
         return None
 
     def get_options_key(self, cls_obj: type[object] | None = None, dynamic_name: str | None = None) -> str | None:

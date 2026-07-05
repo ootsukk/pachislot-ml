@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 import types
+from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
 
 
