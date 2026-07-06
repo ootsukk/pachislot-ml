@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import types
+import typing
 from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
-import typing
+
+from container.common.metadata import CacheKey
 
 
 @runtime_checkable
@@ -11,6 +14,13 @@ class Initializable(Protocol):
     """オブジェクトの初期化ライフサイクルを構造的に保証するプロトコル。"""
 
     def initialize(self) -> None: ...
+
+
+@runtime_checkable
+class Closable(Protocol):
+    """構造的適合性を保証するためのリソース管理プロトコル"""
+
+    def close(self) -> None: ...
 
 
 class InstanceResolver(Protocol):
@@ -59,6 +69,29 @@ class InstanceResolver(Protocol):
         コンパイル（静的解析）フェーズで完全に防御します。
         """
         ...
+
+
+@runtime_checkable
+class ResolverBuilder(Protocol):
+    """InstanceResolver側から再構築を安全にトリガーするためのビルダー抽象インターフェース。"""
+
+    def build(self) -> InstanceResolver: ...
+
+
+@runtime_checkable
+class ScopeStrategy(Protocol):
+    """コンポーネントの生存期間とインスタンス記憶領域を抽象化するスコープ戦略インターフェース。"""
+
+    def get(self, key: CacheKey, /) -> object | None: ...
+
+    def put(self, key: CacheKey, instance: object, /) -> None: ...
+
+    def remove(self, key: CacheKey, /) -> object | None: ...
+
+    def synchronize(self, key: CacheKey, /) -> contextlib.AbstractContextManager[None]: ...
+
+    def clear(self) -> None: ...
+
 
 class InstantiationStrategy(Protocol):
     """具象プラグインの物理生成手順をカプセル化する戦略インターフェース。"""

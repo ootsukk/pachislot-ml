@@ -7,7 +7,7 @@ from typing import Final
 from container.common.constants import ComponentScope
 from container.common.exceptions import ComponentInstantiationError
 from container.common.interfaces import Initializable, InstancePostProcessor
-from container.core.cache import CacheKey, ComponentId
+from container.common.metadata import CacheKey, ComponentId
 from container.definitions.component import Component
 from container.definitions.naming import ChainNamingStrategy
 from container.definitions.resolvable import ResolvableType
@@ -25,14 +25,14 @@ class ComponentInstantiationEngine:
         registry: PluginRegistry,
         raw_config: Mapping[str, object],
         factory_registry: ComponentFactoryRegistry,
-        bpp_chain: Sequence[InstancePostProcessor],
+        ipp_chain: Sequence[InstancePostProcessor],
         /,
     ) -> None:
         self.registry: Final[PluginRegistry] = registry
         self.raw_config: Final[Mapping[str, object]] = raw_config
         self._factory_registry: Final[ComponentFactoryRegistry] = factory_registry
         self._collection_factory: Final = factory_registry.collection_factory
-        self._bpp_chain: Final[tuple[InstancePostProcessor, ...]] = tuple(bpp_chain)
+        self._ipp_chain: Final[tuple[InstancePostProcessor, ...]] = tuple(ipp_chain)
 
     def resolve_plugin_stream(self, spec_type: type[object], /) -> list[PluginDefinition[object]]:
         definitions = self.registry.get_all_definitions(spec_type)
@@ -41,12 +41,12 @@ class ComponentInstantiationEngine:
     def apply_pipeline(self, instance: object, bean_name: ComponentId, /) -> object:
         current_bean = instance
         name_str = bean_name.value
-        for bpp in self._bpp_chain:
-            current_bean = bpp.post_process_before(current_bean, name_str)
+        for ipp in self._ipp_chain:
+            current_bean = ipp.post_process_before(current_bean, name_str)
         if isinstance(current_bean, Initializable):
             current_bean.initialize()
-        for bpp in self._bpp_chain:
-            current_bean = bpp.post_process_after(current_bean, name_str)
+        for ipp in self._ipp_chain:
+            current_bean = ipp.post_process_after(current_bean, name_str)
         return current_bean
 
     def instantiate(self, component: Component[object], session: ResolutionSession, /) -> object | None:
@@ -85,7 +85,7 @@ class ComponentInstantiationEngine:
             session.register_resource(processed_bean)
             session.put_cached_instance(cache_key, processed_bean)
             if cache_key != actual_key:
-                session.set_cache_alias(actual_key, cache_key)
+                session.put_cached_instance(actual_key, processed_bean)
             return processed_bean
 
         return session.execute_with_lock(cache_key, factory_action)

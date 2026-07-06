@@ -6,8 +6,8 @@ import typing
 from collections.abc import Mapping, Sequence
 from typing import Final
 
-from container.common.interfaces import InstancePostProcessor, InstanceResolver
-from container.core.cache import CacheKey
+from container.common.interfaces import InstancePostProcessor, InstanceResolver, ResolverBuilder
+from container.common.metadata import CacheKey, SingletonScopeStrategy
 from container.core.container import RuntimeInstanceResolver
 from container.core.context import ComponentFactoryRegistry
 from container.definitions.component import Component, ComponentRegistry
@@ -79,7 +79,7 @@ class DependencyGraphSorter:
             ) from err
 
 
-class InstanceResolverBuilder:
+class InstanceResolverBuilder(ResolverBuilder):
     """SpringのContext.refresh思想をカプセル化し、自動コンポーネントスキャンから検証、Contextの鋳造までを司る専任ビルダー。"""
 
     def __init__(
@@ -142,8 +142,16 @@ class InstanceResolverBuilder:
         plugin_factory = PluginInstanceFactory()
         collection_factory = CollectionInstanceFactory(plugin_factory)
         factory_registry = ComponentFactoryRegistry(config_factory, plugin_factory, collection_factory)
+        scope_strategy = SingletonScopeStrategy()
 
-        container = RuntimeInstanceResolver(registry_data, registry, raw_config_map, self._post_processors, factory_registry, builder_context=self)
+        container = RuntimeInstanceResolver(
+            registry_data,
+            registry,
+            raw_config_map,
+            self._post_processors,
+            factory_registry,
+            scope_strategy,
+            self)
 
         for p_key, p_inst in self._provided_instances.items():
             match p_key:
@@ -152,9 +160,9 @@ class InstanceResolverBuilder:
                     cache_key = CacheKey(t_type, p_name)
                 case _:
                     cache_key = CacheKey(p_key, None)
-            container._cache.put_if_absent(cache_key, p_inst)
+            container._scope.put(cache_key, p_inst)
 
-        container._cache.put_if_absent(CacheKey(config_type, None), self._config)
+        container._scope.put(CacheKey(config_type, None), self._config)
 
         for node in perfectly_ordered_nodes:
             if registry_data.lookup(node) is not None:

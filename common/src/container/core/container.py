@@ -8,9 +8,9 @@ from typing import Final, cast
 
 from container.common.constants import ComponentScope
 from container.common.exceptions import ComponentInstantiationError
-from container.common.interfaces import ContextBuilder, InstancePostProcessor, InstanceResolver
-from container.core.cache import CacheKey, SingletonBeanCache
-from container.core.context import Closable, ComponentFactoryRegistry, ResolutionSession
+from container.common.interfaces import Closable, ContextBuilder, InstancePostProcessor, InstanceResolver, ScopeStrategy
+from container.common.metadata import CacheKey
+from container.core.context import ComponentFactoryRegistry, ResolutionSession
 from container.core.engine import ComponentInstantiationEngine
 from container.definitions.component import ComponentRegistry
 from container.definitions.registry import PluginRegistry
@@ -27,14 +27,14 @@ class RuntimeInstanceResolver(InstanceResolver):
         raw_config: Mapping[str, object],
         post_processors: Sequence[InstancePostProcessor],
         factory_registry: ComponentFactoryRegistry,
+        scope_strategy: ScopeStrategy,
+        builder_context: ContextBuilder,
         /,
-        *,
-        builder_context: ContextBuilder | None = None,
     ) -> None:
         self._registry_data: Final[ComponentRegistry] = registry_data
         self._exit_stack: Final[contextlib.ExitStack] = contextlib.ExitStack()
-        self._cache: Final[SingletonBeanCache] = SingletonBeanCache()
-        self._builder_context: Final[ContextBuilder | None] = builder_context
+        self._scope: Final[ScopeStrategy] = scope_strategy
+        self._builder_context: Final[ContextBuilder] = builder_context
 
         self._instantiation_engine: Final[ComponentInstantiationEngine] = ComponentInstantiationEngine(
             registry,
@@ -86,9 +86,10 @@ class RuntimeInstanceResolver(InstanceResolver):
             actual_type = target_type
 
         cache_key = CacheKey(actual_type, name)
-        if self._cache.contains(cache_key):
+        if self._scope.get(cache_key) is not None:
             return True
         return self._registry_data.lookup(actual_type, name) is not None
+
 
     def is_singleton(self, target_type: type[object] | types.GenericAlias, /, *, name: str | None = None) -> bool:
         component = self._registry_data.lookup(target_type, name)
@@ -176,7 +177,7 @@ class RuntimeInstanceResolver(InstanceResolver):
             actual_type = target_type
 
         cache_key = CacheKey(actual_type, plugin_name)
-        if (cached := self._cache.get(cache_key)) is not None:
+        if (cached := self._scope.get(cache_key)) is not None:
             return cast(T, cached)
 
         component = self._registry_data.lookup(actual_type, plugin_name)
@@ -184,7 +185,7 @@ class RuntimeInstanceResolver(InstanceResolver):
             session = ResolutionSession(self, stack, plugin_name)
             resolvable_lookup = ResolvableType[T](actual_type)
             dynamic_collection = self._instantiation_engine.instantiate_dynamic_collection(resolvable_lookup, session)
-            self._cache.put_if_absent(cache_key, dynamic_collection)
+            self._scope.put(cache_key, dynamic_collection)
             return cast(T, dynamic_collection)
 
         if component is None:
@@ -205,5 +206,5 @@ class RuntimeInstanceResolver(InstanceResolver):
             self._exit_stack.callback(instance.close)
 
     def close(self) -> None:
-        self._cache.clear()
+        self._scope.clear()
         self._exit_stack.close()

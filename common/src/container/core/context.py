@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import types
 import typing
-from typing import Final, Protocol, cast, runtime_checkable
+from typing import Final, cast
 
-from container.core.cache import CacheKey, ComponentId
+from container.common.metadata import CacheKey, ComponentId
 from container.definitions.component import Component
 from container.instantiation.factory import (
     CollectionFactory,
@@ -19,15 +19,8 @@ if typing.TYPE_CHECKING:
     from container.definitions.registry import PluginDefinition
 
 
-@runtime_checkable
-class Closable(Protocol):
-    """構造的適合性を保証するためのリソース管理プロトコル"""
-
-    def close(self) -> None: ...
-
-
 class ResolutionSession:
-    """単一の解決要求のライフサイクルをホールドしファクトリ層への文脈仲介とBPP適用を統括するコンテキスト"""
+    """単一の解決要求のライフサイクルをホールドしファクトリ層への文脈仲介とIPP適用を統括するコンテキスト"""
 
     def __init__(
         self,
@@ -63,14 +56,24 @@ class ResolutionSession:
         self._container._register_resource(instance)
 
     def put_cached_instance(self, key: CacheKey, instance: object, /) -> None:
-        self._container._cache.put_if_absent(key, instance)
-
-    def set_cache_alias(self, alias_key: CacheKey, target_key: CacheKey, /) -> None:
-        self._container._cache.set_alias(alias_key, target_key)
+        self._container._scope.put(key, instance)
 
     def execute_with_lock(self, key: CacheKey, factory_callback: typing.Callable[[], object], /) -> object:
-        with self._container._cache.synchronize_instantiation(key, self._stack):
-            return factory_callback()
+        from container.common.exceptions import CircularDependencyError
+        if key in self._stack:
+            raise CircularDependencyError(f"循環依存が検出されました。パス: {key.target_type}")
+
+        if (cached := self._container._scope.get(key)) is not None:
+            return cached
+
+        self._stack.add(key)
+        try:
+            with self._container._scope.synchronize(key):
+                if (cached_double := self._container._scope.get(key)) is not None:
+                    return cached_double
+                return factory_callback()
+        finally:
+            self._stack.remove(key)
 
 
 class ComponentFactoryRegistry:

@@ -8,7 +8,7 @@ from typing import Final, cast
 
 from container.definitions.registry import PluginDefinition, PluginRegistry
 
-_LOGGER: Final[logging.Logger] = logging.getLogger("container.registry")
+_LOGGER: Final[logging.Logger] = logging.getLogger("container.scanner.serializer")
 
 
 class PluginIndexSerializer:
