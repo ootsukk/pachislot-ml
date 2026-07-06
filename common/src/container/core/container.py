@@ -156,48 +156,49 @@ class RuntimeInstanceResolver(InstanceResolver):
         self,
         target_type: type[T] | types.GenericAlias | types.UnionType,
         stack: set[CacheKey],
+        /,
         *,
         plugin_name: str | None = None,
     ) -> T | None:
-        is_optional = False
-        actual_type: type[object] | types.GenericAlias
 
-        if isinstance(target_type, types.UnionType):
-            args = typing.get_args(target_type)
-            if type(None) in args:
-                is_optional = True
-                remaining = [a for a in args if a is not type(None)]
-                if remaining and isinstance(remaining[0], type | types.GenericAlias):
-                    actual_type = remaining[0]
-                else:
-                    actual_type = object
-            else:
-                actual_type = args[0] if args and isinstance(args[0], type | types.GenericAlias) else object
-        else:
-            actual_type = target_type
+        resolvable = ResolvableType.from_annotation(target_type)
+        if resolvable is None:
+            raise ComponentInstantiationError(f"指定された型アノテーションを解析できません: {target_type}")
 
+        actual_type = resolvable.raw_type
+
+        # 優先順位 1: キャッシュからの定数時間
         cache_key = CacheKey(actual_type, plugin_name)
         if (cached := self._scope.get(cache_key)) is not None:
             return cast(T, cached)
 
+        # 優先順位 2: レジストリ定義の直接参照
         component = self._registry_data.lookup(actual_type, plugin_name)
+
+        # ジェネリックAlias（コレクション表現）に対する動的初期化パス
         if component is None and isinstance(actual_type, types.GenericAlias):
             session = ResolutionSession(self, stack, plugin_name)
-            resolvable_lookup = ResolvableType[T](actual_type)
-            dynamic_collection = self._instantiation_engine.instantiate_dynamic_collection(resolvable_lookup, session)
+            dynamic_collection = self._instantiation_engine.instantiate_dynamic_collection(resolvable, session)
             self._scope.put(cache_key, dynamic_collection)
             return cast(T, dynamic_collection)
 
+        # 優先順位 3 & 4: 匿名フォールバックおよび例外ハンドリング
         if component is None:
-            if plugin_name:
-                return cast(T, self._get_internal_instance(actual_type, stack, plugin_name=None))
-            if is_optional:
+            if plugin_name is not None:
+                return cast(
+                    T,
+                    self._get_internal_instance(actual_type, stack, plugin_name=None),
+                )
+            if resolvable.is_optional:
                 return None
             raise ComponentInstantiationError(f"未登録型: {actual_type}")
 
         session = ResolutionSession(self, stack, plugin_name)
         result = self._instantiation_engine.resolve_scoped_instance(
-            component, cache_key, CacheKey(component.target_type, plugin_name), session
+            component,
+            cache_key,
+            CacheKey(component.target_type, plugin_name),
+            session,
         )
         return cast(T, result)
 

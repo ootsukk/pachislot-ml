@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import inspect
 import types
 import typing
@@ -13,49 +11,34 @@ class ResolvableType[T]:
     """型およびGenericAliasのメタ操作をカプセル化する不変のドメイン型オブジェクト"""
 
     raw_type: Final[type[object] | types.GenericAlias]
+    is_optional: Final[bool] = False
 
     @classmethod
     def from_annotation(cls, annotation: object, /) -> ResolvableType[object] | None:
+        """型アノテーションからUnion型およびOptional性を解体抽出し、適切な状態を持つ不変インスタンスを鋳造します。"""
         if annotation is inspect.Parameter.empty:
             return None
 
-        origin = typing.get_origin(annotation)
-        args = typing.get_args(annotation)
-
-        match origin:
-            case typing.Union:
-                for arg in args:
-                    if arg is type(None):
-                        continue
-                    if (unwrapped := cls.from_annotation(arg)) is not None:
-                        return unwrapped
-                return None
-            case _:
-                if isinstance(annotation, types.UnionType):
-                    for arg in args:
-                        if arg is type(None):
-                            continue
-                        if (unwrapped := cls.from_annotation(arg)) is not None:
-                            return unwrapped
-                    return None
-
-        if origin is not None:
-            match annotation:
-                case types.GenericAlias():
-                    return cls(annotation)
-            if isinstance(origin, type):
-                return cls(origin)
-            return None
-
         match annotation:
+            case _ if isinstance(annotation, types.UnionType) or typing.get_origin(annotation) is typing.Union:
+                args = typing.get_args(annotation)
+                is_opt = type(None) in args
+                remaining = [a for a in args if a is not type(None)]
+                if remaining and isinstance(remaining[0], type | types.GenericAlias):
+                    return cls(remaining[0], is_optional=is_opt)
+                return cls(object, is_optional=is_opt)
+
+            case types.GenericAlias() as alias:
+                return cls(alias, is_optional=False)
+
             case type() as t:
-                return cls(t)
+                return cls(t, is_optional=False)
+
             case _:
                 return None
 
     @property
     def origin(self) -> type[object]:
-        """GenericAliasであればその原型、プレーンな型であれば自身を安全に返却します [Effective Python Item 77]"""
         if (origin_type := typing.get_origin(self.raw_type)) is not None and isinstance(origin_type, type):
             return cast(type[object], origin_type)
 
@@ -80,14 +63,14 @@ class ResolvableType[T]:
 
     @property
     def first_generic_argument(self) -> type[T]:
-        """第1型パラメータを仕様型Tとして安全に抽出・伝播させます [Effective Python Item 41]"""
+        """第1型パラメータを仕様型Tとして安全に抽出・伝播させます [Effective Python Item 41]。"""
         args = self.generic_arguments
         if args and isinstance(args[0], type):
             return cast(type[T], args[0])
         return cast(type[T], object)
 
     def is_assignable_from(self, target_class: type[object], /) -> bool:
-        """指定されたクラスが、自身の原型型に対して代入可能か安全に検証します [Effective Python Item 24]"""
+        """指定されたクラスが、自身の原型型に対して代入可能か安全に検証します [Effective Python Item 24]。"""
         try:
             return issubclass(target_class, self.origin)
         except TypeError:
