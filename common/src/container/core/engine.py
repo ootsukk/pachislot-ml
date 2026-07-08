@@ -8,7 +8,7 @@ from container.common.constants import ComponentScope
 from container.common.exceptions import ComponentInstantiationError
 from container.common.interfaces import Initializable, InstancePostProcessor
 from container.common.metadata import CacheKey, ComponentId
-from container.definitions.component import Component, CollectionComponent, PluginComponent
+from container.definitions.component import CollectionComponent, Component, PluginComponent
 from container.definitions.naming import ChainNamingStrategy
 from container.definitions.resolvable import ResolvableType
 from container.instantiation.factory import ComponentFactoryRegistry
@@ -61,7 +61,7 @@ class ComponentInstantiationEngine:
         return instance
 
     def instantiate_dynamic_collection[E](
-        self, resolvable: ResolvableType[E], session: ResolutionSession, key: str, /
+        self, resolvable: ResolvableType[E], session: ResolutionSession, key: str | None, /
     ) -> Sequence[E]:
         """要求された型メタ操作オブジェクトおよび外枠のキーに基づき、位置専用引数の規約に則って透過的にコレクションを生成します。"""
         element_type = resolvable.first_generic_argument

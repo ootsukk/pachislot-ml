@@ -6,82 +6,18 @@ import typing
 from collections.abc import Mapping, Sequence
 from typing import Final
 
-from container.common.interfaces import InstancePostProcessor, RuntimeContainer, ResolverBuilder
+from container.common.interfaces import InstancePostProcessor, ResolverBuilder, RuntimeContainer
 from container.common.metadata import CacheKey, SingletonScopeStrategy
 from container.core.container import RuntimeInstanceContainer
+from container.core.engine import ComponentInstantiationEngine
 from container.definitions.component import Component, ComponentRegistry
 from container.definitions.descriptor import PluginDescriptor
 from container.definitions.registry import PluginRegistry
 from container.definitions.resolvable import ResolvableType
 from container.instantiation.factory import (
     ComponentFactoryRegistry,
-    InstanceComponentFactory,
-    CollectionComponentFactory,
-    PluginComponentFactory,
-    PropertyComponentFactory,
 )
 from container.scanner.scanner import PluginScanner
-
-
-class DependencyGraphSorter:
-    """コンポーネント定義書およびレジストリストアの静的メタデータから、型安全なトポロジカルソート順を算出する専任クラス。"""
-
-    def __init__(
-        self,
-        registry_data: ComponentRegistry,
-        registry: PluginRegistry,
-        raw_config: Mapping[str, object],
-        components: Sequence[Component[object]],
-        /,
-    ) -> None:
-        self._registry_data: Final[ComponentRegistry] = registry_data
-        self._registry: Final[PluginRegistry] = registry
-        self._raw_config: Final[Mapping[str, object]] = raw_config
-        self._components: Final[Sequence[Component[object]]] = tuple(components)
-
-    def sort_nodes(self, config_type: type[object], /) -> Sequence[type[object] | types.GenericAlias]:
-        """直交依存関係グラフを網羅的に構築し、閉路（循環参照）の検証を行った後、ソート済みのノードシーケンスを返却します。"""
-        sorter: graphlib.TopologicalSorter[type[object] | types.GenericAlias] = graphlib.TopologicalSorter()
-
-        sorter.add(config_type)
-
-        for comp in self._components:
-            sorter.add(comp.target_type)
-
-        for comp in self._components:
-            if hasattr(comp, "plugin_spec_type") and (spec_type := comp.plugin_spec_type) is not None:
-                if not isinstance(spec_type, type):
-                    continue
-
-                definitions = self._registry.get_all_definitions(spec_type)
-
-                for definition in definitions:
-                    raw_payload = self._raw_config.get(definition.plugin_name)
-                    setting = PluginDescriptor(raw_payload, comp.naming_strategy)
-                    if not setting.enabled:
-                        continue
-
-                    impl_node = definition.impl_class
-                    sorter.add(impl_node, spec_type)
-
-                    for dep_spec in definition.depends_on:
-                        sorter.add(impl_node, dep_spec)
-
-                    for dep_param_type in definition.constructor_dependencies.values():
-                        resolvable_dep = ResolvableType[typing.Any](dep_param_type)
-                        target_lookup = resolvable_dep.raw_type
-
-                        if self._registry_data.lookup(target_lookup) is not None:
-                            sorter.add(impl_node, target_lookup)
-                        elif self._registry_data.lookup(resolvable_dep.origin) is not None:
-                            sorter.add(impl_node, resolvable_dep.origin)
-
-        try:
-            return list(sorter.static_order())
-        except graphlib.CycleError as err:
-            raise RuntimeError(
-                f"トポロジー上に閉路（循環参照）が検出されたため、コンテナの構築を安全に停止します: {err}"
-            ) from err
 
 
 class InstanceResolverBuilder(ResolverBuilder):
@@ -146,14 +82,14 @@ class InstanceResolverBuilder(ResolverBuilder):
         factory_registry = ComponentFactoryRegistry()
         scope_strategy = SingletonScopeStrategy()
 
-        container = RuntimeInstanceContainer(
-            registry_data,
+        instantiation_engine = ComponentInstantiationEngine(
             registry,
             raw_config_map,
-            self._post_processors,
             factory_registry,
-            scope_strategy,
-            self)
+            self._post_processors,
+        )
+
+        container = RuntimeInstanceContainer(registry_data, scope_strategy, instantiation_engine, self)
 
         for p_key, p_inst in self._provided_instances.items():
             match p_key:
@@ -171,3 +107,64 @@ class InstanceResolverBuilder(ResolverBuilder):
                 container.resolve(node)
 
         return container
+
+
+class DependencyGraphSorter:
+    """コンポーネント定義書およびレジストリストアの静的メタデータから、型安全なトポロジカルソート順を算出する専任クラス。"""
+
+    def __init__(
+        self,
+        registry_data: ComponentRegistry,
+        registry: PluginRegistry,
+        raw_config: Mapping[str, object],
+        components: Sequence[Component[object]],
+        /,
+    ) -> None:
+        self._registry_data: Final[ComponentRegistry] = registry_data
+        self._registry: Final[PluginRegistry] = registry
+        self._raw_config: Final[Mapping[str, object]] = raw_config
+        self._components: Final[Sequence[Component[object]]] = tuple(components)
+
+    def sort_nodes(self, config_type: type[object], /) -> Sequence[type[object] | types.GenericAlias]:
+        """直交依存関係グラフを網羅的に構築し、閉路（循環参照）の検証を行った後、ソート済みのノードシーケンスを返却します。"""
+        sorter: graphlib.TopologicalSorter[type[object] | types.GenericAlias] = graphlib.TopologicalSorter()
+
+        sorter.add(config_type)
+
+        for comp in self._components:
+            sorter.add(comp.target_type)
+
+        for comp in self._components:
+            if hasattr(comp, "plugin_spec_type") and (spec_type := comp.plugin_spec_type) is not None:
+                if not isinstance(spec_type, type):
+                    continue
+
+                definitions = self._registry.get_all_definitions(spec_type)
+
+                for definition in definitions:
+                    raw_payload = self._raw_config.get(definition.plugin_name)
+                    setting = PluginDescriptor(raw_payload, comp.naming_strategy)
+                    if not setting.enabled:
+                        continue
+
+                    impl_node = definition.impl_class
+                    sorter.add(impl_node, spec_type)
+
+                    for dep_spec in definition.depends_on:
+                        sorter.add(impl_node, dep_spec)
+
+                    for dep_param_type in definition.constructor_dependencies.values():
+                        resolvable_dep = ResolvableType[typing.Any](dep_param_type)
+                        target_lookup = resolvable_dep.raw_type
+
+                        if self._registry_data.lookup(target_lookup) is not None:
+                            sorter.add(impl_node, target_lookup)
+                        elif self._registry_data.lookup(resolvable_dep.origin) is not None:
+                            sorter.add(impl_node, resolvable_dep.origin)
+
+        try:
+            return list(sorter.static_order())
+        except graphlib.CycleError as err:
+            raise RuntimeError(
+                f"トポロジー上に閉路（循環参照）が検出されたため、コンテナの構築を安全に停止します: {err}"
+            ) from err

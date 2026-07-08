@@ -3,20 +3,17 @@ from __future__ import annotations
 import contextlib
 import types
 import typing
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from typing import Final, cast
 
 from container.common.constants import ComponentScope
 from container.common.exceptions import ComponentInstantiationError
-from container.common.interfaces import Closable, ContextBuilder, InstancePostProcessor, RuntimeContainer, ScopeStrategy
+from container.common.interfaces import Closable, ContextBuilder, RuntimeContainer, ScopeStrategy
 from container.common.metadata import CacheKey
 from container.core.engine import ComponentInstantiationEngine
 from container.core.session import ResolutionSession
 from container.definitions.component import ComponentRegistry
-from container.definitions.naming import ChainNamingStrategy
-from container.definitions.registry import PluginRegistry
 from container.definitions.resolvable import ResolvableType
-from container.instantiation.factory import ComponentFactoryRegistry
 
 
 class RuntimeInstanceContainer(RuntimeContainer):
@@ -25,25 +22,16 @@ class RuntimeInstanceContainer(RuntimeContainer):
     def __init__(
         self,
         registry_data: ComponentRegistry,
-        registry: PluginRegistry,
-        raw_config: Mapping[str, object],
-        post_processors: Sequence[InstancePostProcessor],
-        factory_registry: ComponentFactoryRegistry,
         scope_strategy: ScopeStrategy,
+        instantiation_engine: ComponentInstantiationEngine,
         builder_context: ContextBuilder,
         /,
     ) -> None:
         self._registry_data: Final[ComponentRegistry] = registry_data
-        self._exit_stack: Final[contextlib.ExitStack] = contextlib.ExitStack()
         self._scope: Final[ScopeStrategy] = scope_strategy
+        self._instantiation_engine: Final[ComponentInstantiationEngine] = instantiation_engine
         self._builder_context: Final[ContextBuilder] = builder_context
-
-        self._instantiation_engine: Final[ComponentInstantiationEngine] = ComponentInstantiationEngine(
-            registry,
-            raw_config,
-            factory_registry,
-            post_processors,
-        )
+        self._exit_stack: Final[contextlib.ExitStack] = contextlib.ExitStack()
 
     def rebuild(self) -> RuntimeContainer:
         if self._builder_context is None:
@@ -168,9 +156,8 @@ class RuntimeInstanceContainer(RuntimeContainer):
 
         if component is None and isinstance(actual_type, types.GenericAlias):
             session = ResolutionSession(self, stack, name)
-            naming_strategy = ChainNamingStrategy(name)
             dynamic_collection = self._instantiation_engine.instantiate_dynamic_collection(
-                resolvable, session, naming_strategy
+                resolvable, session, name
             )
             self._scope.put(cache_key, dynamic_collection)
             return cast(T, dynamic_collection)
