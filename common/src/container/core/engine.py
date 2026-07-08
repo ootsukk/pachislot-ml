@@ -9,7 +9,7 @@ from container.common.exceptions import ComponentInstantiationError
 from container.common.interfaces import Initializable, InstancePostProcessor
 from container.common.metadata import CacheKey, ComponentId
 from container.definitions.component import CollectionComponent, Component, PluginComponent
-from container.definitions.naming import ChainNamingStrategy
+from container.definitions.naming import ChainNamingStrategy, NamingStrategy
 from container.definitions.resolvable import ResolvableType
 from container.instantiation.factory import ComponentFactoryRegistry
 
@@ -61,32 +61,27 @@ class ComponentInstantiationEngine:
         return instance
 
     def instantiate_dynamic_collection[E](
-        self, resolvable: ResolvableType[E], session: ResolutionSession, key: str | None, /
+        self, resolvable: ResolvableType[E], session: ResolutionSession, naming_strategy: NamingStrategy, /
     ) -> Sequence[E]:
-        """要求された型メタ操作オブジェクトおよび外枠のキーに基づき、位置専用引数の規約に則って透過的にコレクションを生成します。"""
         element_type = resolvable.first_generic_argument
 
         virtual_element_component = PluginComponent(
             element_type,
-            ChainNamingStrategy(""),
+            ChainNamingStrategy(),
         )
 
         virtual_component = CollectionComponent(
             resolvable.raw_type,
-            ChainNamingStrategy(key),
+            naming_strategy,
             virtual_element_component,
             mandatory=True,
         )
 
         factory = self._factory_registry.get_factory(CollectionComponent)
         if factory is None:
-            raise ComponentInstantiationError(
-                "CollectionComponentFactory が中央レジストリに登録されていません。"
-            )
+            raise ComponentInstantiationError("CollectionComponentFactory が中央レジストリに登録されていません。")
 
-        collection_instance = factory.create_instance(
-            virtual_component, session, self.raw_config
-        )
+        collection_instance = factory.create_instance(virtual_component, session, self.raw_config)
 
         return typing.cast(Sequence[E], collection_instance)
 

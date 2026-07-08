@@ -13,6 +13,7 @@ from container.common.metadata import CacheKey
 from container.core.engine import ComponentInstantiationEngine
 from container.core.session import ResolutionSession
 from container.definitions.component import ComponentRegistry
+from container.definitions.naming import ChainNamingStrategy
 from container.definitions.resolvable import ResolvableType
 
 
@@ -156,11 +157,20 @@ class RuntimeInstanceContainer(RuntimeContainer):
 
         if component is None and isinstance(actual_type, types.GenericAlias):
             session = ResolutionSession(self, stack, name)
-            dynamic_collection = self._instantiation_engine.instantiate_dynamic_collection(
-                resolvable, session, name
-            )
-            self._scope.put(cache_key, dynamic_collection)
-            return cast(T, dynamic_collection)
+
+            def factory_action() -> object:
+                if (cached_collection := self._scope.get(cache_key)) is not None:
+                    return cached_collection
+
+                naming_strategy = ChainNamingStrategy(name)
+                dynamic_collection = self._instantiation_engine.instantiate_dynamic_collection(
+                    resolvable, session, naming_strategy
+                )
+                self._scope.put(cache_key, dynamic_collection)
+                return dynamic_collection
+
+            result = session.execute_with_lock(cache_key, factory_action)
+            return cast(T, result)
 
         if component is None:
             if name is not None:
