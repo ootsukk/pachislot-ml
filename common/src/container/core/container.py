@@ -8,16 +8,18 @@ from typing import Final, cast
 
 from container.common.constants import ComponentScope
 from container.common.exceptions import ComponentInstantiationError
-from container.common.interfaces import Closable, ContextBuilder, InstancePostProcessor, InstanceResolver, ScopeStrategy
+from container.common.interfaces import Closable, ContextBuilder, InstancePostProcessor, RuntimeContainer, ScopeStrategy
 from container.common.metadata import CacheKey
-from container.core.context import ComponentFactoryRegistry, ResolutionSession
 from container.core.engine import ComponentInstantiationEngine
+from container.core.session import ResolutionSession
 from container.definitions.component import ComponentRegistry
+from container.definitions.naming import ChainNamingStrategy
 from container.definitions.registry import PluginRegistry
 from container.definitions.resolvable import ResolvableType
+from container.instantiation.factory import ComponentFactoryRegistry
 
 
-class RuntimeInstanceResolver(InstanceResolver):
+class RuntimeInstanceContainer(RuntimeContainer):
     """型解決の整合性を完全回復し、複数ファイル間の公称的一致を保証したコアコンテナ"""
 
     def __init__(
@@ -43,12 +45,10 @@ class RuntimeInstanceResolver(InstanceResolver):
             post_processors,
         )
 
-    def rebuild(self) -> InstanceResolver:
-        """注入された抽象ビルダーを安全にキックし、新規のコンテキストを鋳造するインターフェース。"""
+    def rebuild(self) -> RuntimeContainer:
         if self._builder_context is None:
             raise RuntimeError("現在のコンテナインスタンスにビルド文脈（ContextBuilder）が登録されていません。")
         return self._builder_context.build()
-
 
     @typing.overload
     def resolve[T](self, target_type: type[T] | types.GenericAlias, /, *, name: str | None = None) -> T: ...
@@ -65,31 +65,25 @@ class RuntimeInstanceResolver(InstanceResolver):
         *,
         name: str | None = None,
     ) -> T | None:
-        return self._get_internal_instance(target_type, set(), plugin_name=name)
+        return self._get_internal_instance(target_type, set(), name=name)
 
-    def resolve_all[T](self, spec_type: type[T], /) -> Sequence[T]:
-        session = ResolutionSession(self, set())
-        resolvable = ResolvableType[T](list[spec_type])
-        return self._instantiation_engine.instantiate_dynamic_collection(resolvable, session)
+    def resolve_all[T](self, spec_type: type[T], /, *, name: str | None = None) -> Sequence[T]:
+        list_type = list[spec_type]
+        return cast(Sequence[T], self._get_internal_instance(list_type, set(), name=name))
 
     def contains_instance(
         self, target_type: type[object] | types.GenericAlias | types.UnionType, /, *, name: str | None = None
     ) -> bool:
-        if isinstance(target_type, types.UnionType):
-            args = typing.get_args(target_type)
-            remaining = [a for a in args if a is not type(None)]
-            if remaining and isinstance(remaining[0], type | types.GenericAlias):
-                actual_type: type[object] | types.GenericAlias = remaining[0]
-            else:
-                actual_type = object
-        else:
-            actual_type = target_type
+        resolvable = ResolvableType.from_annotation(target_type)
+        if resolvable is None:
+            return False
 
+        actual_type = resolvable.raw_type
         cache_key = CacheKey(actual_type, name)
+
         if self._scope.get(cache_key) is not None:
             return True
         return self._registry_data.lookup(actual_type, name) is not None
-
 
     def is_singleton(self, target_type: type[object] | types.GenericAlias, /, *, name: str | None = None) -> bool:
         component = self._registry_data.lookup(target_type, name)
@@ -158,46 +152,44 @@ class RuntimeInstanceResolver(InstanceResolver):
         stack: set[CacheKey],
         /,
         *,
-        plugin_name: str | None = None,
+        name: str | None = None,
     ) -> T | None:
-
         resolvable = ResolvableType.from_annotation(target_type)
         if resolvable is None:
             raise ComponentInstantiationError(f"指定された型アノテーションを解析できません: {target_type}")
 
         actual_type = resolvable.raw_type
 
-        # 優先順位 1: キャッシュからの定数時間
-        cache_key = CacheKey(actual_type, plugin_name)
+        cache_key = CacheKey(actual_type, name)
         if (cached := self._scope.get(cache_key)) is not None:
             return cast(T, cached)
 
-        # 優先順位 2: レジストリ定義の直接参照
-        component = self._registry_data.lookup(actual_type, plugin_name)
+        component = self._registry_data.lookup(actual_type, name)
 
-        # ジェネリックAlias（コレクション表現）に対する動的初期化パス
         if component is None and isinstance(actual_type, types.GenericAlias):
-            session = ResolutionSession(self, stack, plugin_name)
-            dynamic_collection = self._instantiation_engine.instantiate_dynamic_collection(resolvable, session)
+            session = ResolutionSession(self, stack, name)
+            naming_strategy = ChainNamingStrategy(name)
+            dynamic_collection = self._instantiation_engine.instantiate_dynamic_collection(
+                resolvable, session, naming_strategy
+            )
             self._scope.put(cache_key, dynamic_collection)
             return cast(T, dynamic_collection)
 
-        # 優先順位 3 & 4: 匿名フォールバックおよび例外ハンドリング
         if component is None:
-            if plugin_name is not None:
+            if name is not None:
                 return cast(
                     T,
-                    self._get_internal_instance(actual_type, stack, plugin_name=None),
+                    self._get_internal_instance(actual_type, stack, name=None),
                 )
             if resolvable.is_optional:
                 return None
             raise ComponentInstantiationError(f"未登録型: {actual_type}")
 
-        session = ResolutionSession(self, stack, plugin_name)
+        session = ResolutionSession(self, stack, name)
         result = self._instantiation_engine.resolve_scoped_instance(
             component,
             cache_key,
-            CacheKey(component.target_type, plugin_name),
+            CacheKey(component.target_type, name),
             session,
         )
         return cast(T, result)

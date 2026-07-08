@@ -1,8 +1,8 @@
-from collections.abc import Iterator
 import contextlib
+import types
+from collections.abc import Iterator
 from dataclasses import dataclass
 from threading import Lock
-import types
 from typing import Final
 
 from container.common.interfaces import ScopeStrategy

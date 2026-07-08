@@ -6,20 +6,20 @@ from container.definitions.component import (
     Component,
     InstanceComponent,
     PluginComponent,
-    PluginListComponent,
-    PropertyComponent,
+    CollectionComponent,
+    InstanceComponent,
 )
-from container.common.interfaces import InstanceResolver, InstancePostProcessor, Initializable
+from container.common.interfaces import RuntimeContainer, InstancePostProcessor, Initializable
 
 # 公開APIのみを厳格に管理
 __all__ = [
-    "InstanceResolver",
+    "RuntimeContainer",
     "InstanceResolverBuilder",
     "InstancePostProcessor",
     "Component",
     "Initializable",
     "InstanceComponent",
     "PluginComponent",
-    "PluginListComponent",
-    "PropertyComponent",
+    "CollectionComponent",
+    "InstanceComponent",
 ]

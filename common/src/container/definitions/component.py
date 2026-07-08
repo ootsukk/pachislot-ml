@@ -91,12 +91,12 @@ class PluginComponent[T](Component[T]):
         return self._resolvable.origin
 
 
-class PluginListComponent[R, T](Component[R]):
-    """複数のプラグインをリストまたはカスタムコレクションとして解決・注入するための仕様定義書。"""
+class CollectionComponent[R, T](Component[R]):
+    """複数のプラグインや構造化設定オブジェクトを、リストまたはカスタムコレクションとして一括解決・集約するための仕様定義書。"""
 
     def __init__(
         self,
-        target_type: type[R],
+        target_type: type[R] | types.GenericAlias,
         naming_strategy: NamingStrategy,
         nested_component: Component[T],
         /,
@@ -116,6 +116,11 @@ class PluginListComponent[R, T](Component[R]):
     @property
     def ordered(self) -> bool:
         return self._ordered
+
+    @property
+    def key(self) -> str:
+        resolved = self._naming_strategy.get_collection_key(self.plugin_spec_type)
+        return resolved if resolved is not None else ""
 
     @property
     def plugin_spec_type(self) -> type[object]:

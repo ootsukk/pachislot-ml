@@ -8,12 +8,13 @@ from container.common.constants import ComponentScope
 from container.common.exceptions import ComponentInstantiationError
 from container.common.interfaces import Initializable, InstancePostProcessor
 from container.common.metadata import CacheKey, ComponentId
-from container.definitions.component import Component
+from container.definitions.component import Component, CollectionComponent, PluginComponent
 from container.definitions.naming import ChainNamingStrategy
 from container.definitions.resolvable import ResolvableType
+from container.instantiation.factory import ComponentFactoryRegistry
 
 if typing.TYPE_CHECKING:
-    from container.core.context import ComponentFactoryRegistry, ResolutionSession
+    from container.core.session import ResolutionSession
     from container.definitions.registry import PluginDefinition, PluginRegistry
 
 
@@ -31,7 +32,6 @@ class ComponentInstantiationEngine:
         self.registry: Final[PluginRegistry] = registry
         self.raw_config: Final[Mapping[str, object]] = raw_config
         self._factory_registry: Final[ComponentFactoryRegistry] = factory_registry
-        self._collection_factory: Final = factory_registry.collection_factory
         self._ipp_chain: Final[tuple[InstancePostProcessor, ...]] = tuple(ipp_chain)
 
     def resolve_plugin_stream(self, spec_type: type[object], /) -> list[PluginDefinition[object]]:
@@ -61,13 +61,33 @@ class ComponentInstantiationEngine:
         return instance
 
     def instantiate_dynamic_collection[E](
-        self, resolvable: ResolvableType[E], session: ResolutionSession, /
+        self, resolvable: ResolvableType[E], session: ResolutionSession, key: str, /
     ) -> Sequence[E]:
+        """要求された型メタ操作オブジェクトおよび外枠のキーに基づき、位置専用引数の規約に則って透過的にコレクションを生成します。"""
         element_type = resolvable.first_generic_argument
-        sorted_defs = self.resolve_plugin_stream(element_type)
-        collection_instance = self._collection_factory.create_collection(
-            sorted_defs, self.raw_config, resolvable, session, ChainNamingStrategy()
+
+        virtual_element_component = PluginComponent(
+            element_type,
+            ChainNamingStrategy(""),
         )
+
+        virtual_component = CollectionComponent(
+            resolvable.raw_type,
+            ChainNamingStrategy(key),
+            virtual_element_component,
+            mandatory=True,
+        )
+
+        factory = self._factory_registry.get_factory(CollectionComponent)
+        if factory is None:
+            raise ComponentInstantiationError(
+                "CollectionComponentFactory が中央レジストリに登録されていません。"
+            )
+
+        collection_instance = factory.create_instance(
+            virtual_component, session, self.raw_config
+        )
+
         return typing.cast(Sequence[E], collection_instance)
 
     def resolve_scoped_instance(

@@ -6,15 +6,20 @@ import typing
 from collections.abc import Mapping, Sequence
 from typing import Final
 
-from container.common.interfaces import InstancePostProcessor, InstanceResolver, ResolverBuilder
+from container.common.interfaces import InstancePostProcessor, RuntimeContainer, ResolverBuilder
 from container.common.metadata import CacheKey, SingletonScopeStrategy
-from container.core.container import RuntimeInstanceResolver
-from container.core.context import ComponentFactoryRegistry
+from container.core.container import RuntimeInstanceContainer
 from container.definitions.component import Component, ComponentRegistry
 from container.definitions.descriptor import PluginDescriptor
 from container.definitions.registry import PluginRegistry
 from container.definitions.resolvable import ResolvableType
-from container.instantiation.factory import CollectionInstanceFactory, ConfigInstanceFactory, PluginInstanceFactory
+from container.instantiation.factory import (
+    ComponentFactoryRegistry,
+    InstanceComponentFactory,
+    CollectionComponentFactory,
+    PluginComponentFactory,
+    PropertyComponentFactory,
+)
 from container.scanner.scanner import PluginScanner
 
 
@@ -114,7 +119,7 @@ class InstanceResolverBuilder(ResolverBuilder):
             sorted(post_processors, key=lambda x: x.priority)
         )
 
-    def build(self) -> InstanceResolver:
+    def build(self) -> RuntimeContainer:
         """静的グラフトポロジー検証を執行し、シングルトンの先行生成（Eager Init）を完遂した不変のContextを返却します。"""
         raw_config_map: dict[str, object] = {}
         if hasattr(self._config, "__dict__"):
@@ -138,13 +143,10 @@ class InstanceResolverBuilder(ResolverBuilder):
         config_type = type(self._config)
         perfectly_ordered_nodes = graph_sorter.sort_nodes(config_type)
 
-        config_factory = ConfigInstanceFactory()
-        plugin_factory = PluginInstanceFactory()
-        collection_factory = CollectionInstanceFactory(plugin_factory)
-        factory_registry = ComponentFactoryRegistry(config_factory, plugin_factory, collection_factory)
+        factory_registry = ComponentFactoryRegistry()
         scope_strategy = SingletonScopeStrategy()
 
-        container = RuntimeInstanceResolver(
+        container = RuntimeInstanceContainer(
             registry_data,
             registry,
             raw_config_map,

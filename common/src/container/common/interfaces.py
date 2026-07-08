@@ -23,7 +23,7 @@ class Closable(Protocol):
     def close(self) -> None: ...
 
 
-class InstanceResolver(Protocol):
+class RuntimeContainer(Protocol):
     """コンテナ内アセットに対する読み取り専用の最上位抽象境界インターフェース。"""
 
     @typing.overload
@@ -75,7 +75,7 @@ class InstanceResolver(Protocol):
 class ResolverBuilder(Protocol):
     """InstanceResolver側から再構築を安全にトリガーするためのビルダー抽象インターフェース。"""
 
-    def build(self) -> InstanceResolver: ...
+    def build(self) -> RuntimeContainer: ...
 
 
 @runtime_checkable
@@ -119,4 +119,4 @@ class InstancePostProcessor(Protocol):
 class ContextBuilder(Protocol):
     """Container側から再構築や動的実体化を安全にトリガーするためのビルダー抽象インターフェース。"""
 
-    def build(self) -> InstanceResolver: ...
+    def build(self) -> RuntimeContainer: ...
