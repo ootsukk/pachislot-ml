@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+import types
 import typing
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Final, Protocol, cast
 
 from pydantic import BaseModel
@@ -24,6 +26,61 @@ if typing.TYPE_CHECKING:
     from container.definitions.registry import PluginDefinition
 
 
+@dataclass(frozen=True)
+class ElementMetadata:
+    """ファクトリが実体化したオブジェクトに伴う、コンテナ管理用の一次メタデータコンテナ。"""
+
+    instance: object
+    priority: int = 0
+    name: str | None = None
+
+
+class MetadataWrapperFactory:
+    """実体インスタンスとコンテナメタデータを、要求された任意のラッパークラスへ動的にマッピング・鋳造する専任ファクトリ。"""
+
+    def create_wrapper(
+        self,
+        requested_type: type[object],
+        raw_target_type: type[object] | types.GenericAlias,
+        metadata: ElementMetadata,
+        /,
+    ) -> object:
+        """要求された要素型アノテーションを解析し、必要に応じてメタデータを包摂したラッパーオブジェクトを動的に組み立てて返却します。"""
+        resolvable = ResolvableType.from_annotation(raw_target_type)
+        if resolvable and requested_type is resolvable.origin:
+            return metadata.instance
+
+        try:
+            sig = inspect.signature(requested_type.__init__)
+        except ValueError, TypeError:
+            return metadata.instance
+
+        kwargs: dict[str, object] = {}
+        for p_name, p_param in sig.parameters.items():
+            if p_name == "self":
+                continue
+
+            p_resolvable = ResolvableType.from_annotation(p_param.annotation)
+
+            if p_resolvable and p_resolvable.is_assignable_from(type(metadata.instance)):
+                kwargs[p_name] = metadata.instance
+            elif p_name == "priority" or p_param.annotation is int:
+                kwargs[p_name] = metadata.priority
+            elif p_name in ("name", "name_key", "plugin_name") or p_param.annotation in (str, str | None):
+                kwargs[p_name] = metadata.name
+            elif p_param.default is not inspect.Parameter.empty:
+                continue
+            elif p_resolvable and p_resolvable.is_optional:
+                kwargs[p_name] = None
+
+        try:
+            return requested_type(**kwargs)
+        except Exception as err:
+            raise ComponentInstantiationError(
+                f"ラッパークラス '{requested_type.__name__}' の動的生成に失敗しました: {err}"
+            ) from err
+
+
 class ComponentFactory[C: Component[object]](Protocol):
     """すべてのコンポーネントファクトリが共有する共通インターフェース規約。"""
 
@@ -42,6 +99,7 @@ class ComponentFactory[C: Component[object]](Protocol):
         component: C,
         session: ResolutionSession,
         outer_config: object,
+        requested_element_type: type[object],
         /,
     ) -> Sequence[object]:
         """コレクションの構成要素として要求された際、自身に閉じたループ駆動で複数インスタンスを多態的に一括鋳造します。"""
@@ -115,6 +173,9 @@ class ConstructorResolver:
 class InstanceComponentFactory(ComponentFactory[InstanceComponent[object]]):
     """事前に生成済みのシングルトン実体を追加検証なしで透過的にそのまま返却するファクトリ。"""
 
+    def __init__(self, wrapper_factory: MetadataWrapperFactory, /) -> None:
+        self._wrapper_factory: Final[MetadataWrapperFactory] = wrapper_factory
+
     def create_instance(
         self,
         component: InstanceComponent[object],
@@ -125,13 +186,26 @@ class InstanceComponentFactory(ComponentFactory[InstanceComponent[object]]):
         return component.instance
 
     def create_collection_elements(
-        self, component: InstanceComponent[object], session: ResolutionSession, outer_config: object, /
+        self,
+        component: InstanceComponent[object],
+        session: ResolutionSession,
+        outer_config: object,
+        requested_element_type: type[object],
+        /,
     ) -> Sequence[object]:
-        return [component.instance] if component.instance is not None else []
+        inst = component.instance
+        if inst is None:
+            return []
+        meta = ElementMetadata(instance=inst)
+        wrapped = self._wrapper_factory.create_wrapper(requested_element_type, component.target_type, meta)
+        return [wrapped]
 
 
 class PropertyComponentFactory(ComponentFactory[PropertyComponent[object]]):
     """設定オブジェクト（Pydanticモデルまたはデータクラス）の検証およびマッピングを行うファクトリ。"""
+
+    def __init__(self, wrapper_factory: MetadataWrapperFactory, /) -> None:
+        self._wrapper_factory: Final[MetadataWrapperFactory] = wrapper_factory
 
     def deserialize(self, config_class: type[object], payload: Mapping[str, object], /) -> object:
         if issubclass(config_class, BaseModel):
@@ -192,6 +266,7 @@ class PropertyComponentFactory(ComponentFactory[PropertyComponent[object]]):
         component: PropertyComponent[object],
         session: ResolutionSession,
         outer_config: object,
+        requested_element_type: type[object],
         /,
     ) -> Sequence[object]:
         if not isinstance(outer_config, Sequence) or isinstance(outer_config, (str, bytes)):
@@ -207,7 +282,11 @@ class PropertyComponentFactory(ComponentFactory[PropertyComponent[object]]):
         for element_payload in outer_config:
             if isinstance(element_payload, Mapping):
                 payload_map = {str(k): v for k, v in element_payload.items()}
-                instances.append(self.deserialize(target_class, payload_map))
+                inst = self.deserialize(target_class, payload_map)
+
+                meta = ElementMetadata(instance=inst)
+                wrapped = self._wrapper_factory.create_wrapper(requested_element_type, component.target_type, meta)
+                instances.append(wrapped)
 
         return instances
 
@@ -215,11 +294,12 @@ class PropertyComponentFactory(ComponentFactory[PropertyComponent[object]]):
 class PluginComponentFactory(ComponentFactory[PluginComponent[object]]):
     """単一プラグインの環境選出と、コンストラクタインジェクションに基づく組み立てを担当するファクトリ。"""
 
-    def __init__(self) -> None:
+    def __init__(self, wrapper_factory: MetadataWrapperFactory, /) -> None:
         from container.instantiation.validator import (
             PluginEligibilityValidator,
         )
 
+        self._wrapper_factory: Final[MetadataWrapperFactory] = wrapper_factory
         self._validator: Final[PluginEligibilityValidator] = PluginEligibilityValidator()
         self._constructor_resolver: Final[ConstructorResolver] = ConstructorResolver()
 
@@ -285,6 +365,7 @@ class PluginComponentFactory(ComponentFactory[PluginComponent[object]]):
         component: PluginComponent[object],
         session: ResolutionSession,
         outer_config: object,
+        requested_element_type: type[object],
         /,
     ) -> Sequence[object]:
         outer_map = outer_config if isinstance(outer_config, Mapping) else {}
@@ -299,7 +380,9 @@ class PluginComponentFactory(ComponentFactory[PluginComponent[object]]):
 
             inst = self.create_instance_direct(definition, setting, session)
             if inst is not None:
-                instances.append(inst)
+                meta = ElementMetadata(instance=inst, priority=definition.priority, name=definition.plugin_name)
+                wrapped = self._wrapper_factory.create_wrapper(requested_element_type, component.target_type, meta)
+                instances.append(wrapped)
 
         return instances
 
@@ -311,7 +394,6 @@ class CollectionComponentFactory(ComponentFactory[CollectionComponent[object, ob
         self._factory_registry: ComponentFactoryRegistry | None = None
 
     def set_registry(self, registry: ComponentFactoryRegistry) -> None:
-        """中央レジストリの参照を、初期化時の相互循環参照をクリアするためにバインドします。"""
         self._factory_registry = registry
 
     def create_instance(
@@ -330,6 +412,7 @@ class CollectionComponentFactory(ComponentFactory[CollectionComponent[object, ob
         if resolvable is None:
             raise ComponentInstantiationError(f"コレクション型アノテーションを解析できません: {component.target_type}")
 
+        requested_element_type = resolvable.first_generic_argument
         nested = component.nested_component
 
         factory = self._factory_registry.get_factory(type(nested))
@@ -338,7 +421,7 @@ class CollectionComponentFactory(ComponentFactory[CollectionComponent[object, ob
                 f"ネストコンポーネント仕様 '{type(nested).__name__}' に対応する要素ファクトリを取得できませんでした。"
             )
 
-        instances = factory.create_collection_elements(nested, session, outer_config)
+        instances = factory.create_collection_elements(nested, session, outer_config, requested_element_type)
 
         target_collection_type = resolvable.origin
         match target_collection_type:
@@ -356,7 +439,12 @@ class CollectionComponentFactory(ComponentFactory[CollectionComponent[object, ob
                     ) from err
 
     def create_collection_elements(
-        self, component: CollectionComponent[object, object], session: ResolutionSession, outer_config: object, /
+        self,
+        component: CollectionComponent[object, object],
+        session: ResolutionSession,
+        outer_config: object,
+        requested_element_type: type[object],
+        /,
     ) -> Sequence[object]:
         res = self.create_instance(component, session, {component.key: outer_config})
         return cast(Sequence[object], res) if isinstance(res, Sequence) else []
@@ -366,10 +454,11 @@ class ComponentFactoryRegistry:
     """外部DIを完全廃止し、コンポーネント型と対応ファクトリの関係を内部に完璧にカプセル化した最速の中央レジストリ。"""
 
     def __init__(self) -> None:
-        # [自給自足化] 外部からの注入を全廃し、不可分なコアロジックとして内部で直接組み立てる
-        instance_factory = InstanceComponentFactory()
-        property_factory = PropertyComponentFactory()
-        plugin_factory = PluginComponentFactory()
+        wrapper_factory = MetadataWrapperFactory()
+
+        instance_factory = InstanceComponentFactory(wrapper_factory)
+        property_factory = PropertyComponentFactory(wrapper_factory)
+        plugin_factory = PluginComponentFactory(wrapper_factory)
         collection_factory = CollectionComponentFactory()
 
         self._registry_map: Final[dict[type[Component[object]], ComponentFactory[typing.Any]]] = {
