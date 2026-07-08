@@ -67,12 +67,11 @@ class RuntimeInstanceContainer(RuntimeContainer):
         if resolvable is None:
             return False
 
-        actual_type = resolvable.raw_type
-        cache_key = CacheKey(actual_type, name)
+        adjusted_name, cache_key = self._create_cache_context(resolvable, name)
 
         if self._scope.get(cache_key) is not None:
             return True
-        return self._registry_data.lookup(actual_type, name) is not None
+        return self._registry_data.lookup(resolvable.raw_type, adjusted_name) is not None
 
     def is_singleton(self, target_type: type[object] | types.GenericAlias, /, *, name: str | None = None) -> bool:
         component = self._registry_data.lookup(target_type, name)
@@ -135,6 +134,17 @@ class RuntimeInstanceContainer(RuntimeContainer):
             case _:
                 return self.contains_instance(item, name=None)
 
+    def _create_cache_context(
+        self, resolvable: ResolvableType[typing.Any], name: str | None, /
+    ) -> tuple[str | None, CacheKey]:
+        actual_type = resolvable.raw_type
+        if isinstance(actual_type, types.GenericAlias):
+            element_type = resolvable.first_generic_argument
+            adjusted_name = ChainNamingStrategy(name).get_collection_key(element_type)
+        else:
+            adjusted_name = name
+        return adjusted_name, CacheKey(actual_type, adjusted_name)
+
     def _get_internal_instance[T](
         self,
         target_type: type[T] | types.GenericAlias | types.UnionType,
@@ -147,24 +157,24 @@ class RuntimeInstanceContainer(RuntimeContainer):
         if resolvable is None:
             raise ComponentInstantiationError(f"指定された型アノテーションを解析できません: {target_type}")
 
+        adjusted_name, cache_key = self._create_cache_context(resolvable, name)
         actual_type = resolvable.raw_type
 
-        cache_key = CacheKey(actual_type, name)
         if (cached := self._scope.get(cache_key)) is not None:
             return cast(T, cached)
 
-        component = self._registry_data.lookup(actual_type, name)
+        component = self._registry_data.lookup(actual_type, adjusted_name)
 
         if component is None and isinstance(actual_type, types.GenericAlias):
-            session = ResolutionSession(self, stack, name)
+            session = ResolutionSession(self, stack, adjusted_name)
 
             def factory_action() -> object:
                 if (cached_collection := self._scope.get(cache_key)) is not None:
                     return cached_collection
 
-                naming_strategy = ChainNamingStrategy(name)
+                engine_naming_strategy = ChainNamingStrategy(adjusted_name)
                 dynamic_collection = self._instantiation_engine.instantiate_dynamic_collection(
-                    resolvable, session, naming_strategy
+                    resolvable, session, engine_naming_strategy
                 )
                 self._scope.put(cache_key, dynamic_collection)
                 return dynamic_collection
@@ -173,7 +183,7 @@ class RuntimeInstanceContainer(RuntimeContainer):
             return cast(T, result)
 
         if component is None:
-            if name is not None:
+            if adjusted_name is not None:
                 return cast(
                     T,
                     self._get_internal_instance(actual_type, stack, name=None),
@@ -182,11 +192,11 @@ class RuntimeInstanceContainer(RuntimeContainer):
                 return None
             raise ComponentInstantiationError(f"未登録型: {actual_type}")
 
-        session = ResolutionSession(self, stack, name)
+        session = ResolutionSession(self, stack, adjusted_name)
         result = self._instantiation_engine.resolve_scoped_instance(
             component,
             cache_key,
-            CacheKey(component.target_type, name),
+            CacheKey(component.target_type, adjusted_name),
             session,
         )
         return cast(T, result)
