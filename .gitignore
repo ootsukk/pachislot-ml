@@ -90,8 +90,17 @@ build/
 # ==========================================
 # Testing / Jupyter Notebooks / Cache
 # ==========================================
+.coverage
+.coverage.*
+*.lprof
+htmlcov/
+.tox/
+.nox/
 .cache/
 .pytest_cache/
 .mypy_cache/
+.pyright_cache/
 .ruff_cache/
 .ipynb_checkpoints/
+coverage.xml
+nosetests.xml

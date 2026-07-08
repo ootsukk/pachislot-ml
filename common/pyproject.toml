@@ -17,12 +17,21 @@ dependencies = [
     "pyyaml>=6.0.3",
 ]
 
+[tool.ruff]
+extend = "../pyproject.toml"
+
 [tool.pyright]
 venvPath = ".."
 venv = ".venv"
-
-extraPaths = ["src"]
 pythonVersion = "3.14"
+typeCheckingMode = "standard"
+
+extraPaths = [
+    "src",
+    "../data-pipeline/src",
+    "../ml-models/src",
+    "../web-app/src"
+]
 
 [tool.hatch.build.targets.wheel]
 packages = [

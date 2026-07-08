@@ -1,0 +1,46 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+        cache-dependency-glob: "pyproject.toml"
+
+    - name: Set up Python 3.14
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.14"
+
+    - name: Install dependencies
+      run: uv sync --frozen
+
+    - name: Run Ruff Lint and Format Check
+      run: |
+        uv run ruff check .
+        uv run ruff format --check .
+
+    - name: Run Mypy Strict Static Type Check
+      run: uv run mypy common/src/container
+
+    - name: Run Pyright Static Type Check
+      run: uv run pyright
+
+    - name: Run Pytest with Coverage
+      run: uv run pytest

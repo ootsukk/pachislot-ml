@@ -2,8 +2,15 @@
   "python.analysis.importFormat": "absolute",
   "python.analysis.autoImportCompletions": true,
 
-  "editor.defaultFormatter": "charliermarsh.ruff",
-  "editor.formatOnSave": true,
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "always",
+      "source.organizeImports.ruff": "always"
+    },
+  },
+
   "python.terminal.activateEnvironment": false,
   "python.terminal.activateEnvInCurrentTerminal": false,
 
@@ -15,6 +22,8 @@
     "web-app"
   ],
 
+  "explorer.excludeGitIgnore": true,
+
   "files.watcherExclude": {
     "**/.git/objects/**": true,
     "**/.git/subtree-cache/**": true,
@@ -23,10 +32,4 @@
     "**/dist/**": true
   },
 
-  "files.exclude": {
-    "common/": true,
-    "data-pipeline/": true,
-    "web-app/": true,
-    "ml-models/": true,
-  },
 }
