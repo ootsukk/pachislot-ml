@@ -202,7 +202,7 @@ class InstanceComponentFactory(ComponentFactory[InstanceComponent[object]]):
 
 
 class PropertyComponentFactory(ComponentFactory[PropertyComponent[object]]):
-    """設定オブジェクト（Pydanticモデルまたはデータクラス）の検証およびマッピングを行うファクトリ。"""
+    """設定オブジェクト(Pydanticモデルまたはデータクラス)の検証およびマッピングを行うファクトリ。"""
 
     def __init__(self, wrapper_factory: MetadataWrapperFactory, /) -> None:
         self._wrapper_factory: Final[MetadataWrapperFactory] = wrapper_factory

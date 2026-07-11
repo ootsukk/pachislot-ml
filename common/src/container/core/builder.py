@@ -56,7 +56,7 @@ class InstanceResolverBuilder(ResolverBuilder):
         )
 
     def build(self) -> RuntimeContainer:
-        """静的グラフトポロジー検証を執行し、シングルトンの先行生成（Eager Init）を完遂した不変のContextを返却します。"""
+        """静的グラフトポロジー検証を執行し、シングルトンの先行生成(Eager Init)を完遂した不変のContextを返却します。"""
         raw_config_map: dict[str, object] = {}
         if hasattr(self._config, "__dict__"):
             raw_config_map.update({str(k): v for k, v in self._config.__dict__.items()})
@@ -126,7 +126,7 @@ class DependencyGraphSorter:
         self._components: Final[Sequence[Component[object]]] = tuple(components)
 
     def sort_nodes(self, config_type: type[object], /) -> Sequence[type[object] | types.GenericAlias]:
-        """直交依存関係グラフを網羅的に構築し、閉路（循環参照）の検証を行った後、ソート済みのノードシーケンスを返却します。"""
+        """直交依存関係グラフを網羅的に構築し、閉路(循環参照)の検証を行った後、ソート済みのノードシーケンスを返却します。"""
         sorter: graphlib.TopologicalSorter[type[object] | types.GenericAlias] = graphlib.TopologicalSorter()
 
         sorter.add(config_type)
@@ -166,5 +166,5 @@ class DependencyGraphSorter:
             return list(sorter.static_order())
         except graphlib.CycleError as err:
             raise RuntimeError(
-                f"トポロジー上に閉路（循環参照）が検出されたため、コンテナの構築を安全に停止します: {err}"
+                f"トポロジー上に閉路(循環参照)が検出されたため、コンテナの構築を安全に停止します: {err}"
             ) from err

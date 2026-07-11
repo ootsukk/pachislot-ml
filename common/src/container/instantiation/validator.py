@@ -20,7 +20,7 @@ class PluginValidationRule(ABC):
     ) -> bool:
         """対象のプラグイン定義および記述子が、本ルールの評価対象であるか判定します。
 
-        デフォルトではすべてのプラグインを対象（True）とします。サブクラスで必要に応じてオーバーライドします。
+        デフォルトではすべてのプラグインを対象(True)とします。サブクラスで必要に応じてオーバーライドします。
         """
         return True
 
@@ -35,7 +35,7 @@ class PluginValidationRule(ABC):
 
 
 class AnnotationMetadataValidationRule(PluginValidationRule):
-    """実装クラスの装飾規約（アノテーションメタデータ）の存在を検証する具象ルール。"""
+    """実装クラスの装飾規約(アノテーションメタデータ)の存在を検証する具象ルール。"""
 
     def evaluate(
         self,

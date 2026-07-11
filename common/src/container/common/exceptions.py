@@ -6,7 +6,7 @@ class ContainerError(Exception):
 
 
 class CircularDependencyError(ContainerError):
-    """依存関係のトポロジーに閉路（循環参照）が検出された際の例外。"""
+    """依存関係のトポロジーに閉路(循環参照)が検出された際の例外。"""
 
 
 class ComponentInstantiationError(ContainerError):

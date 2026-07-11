@@ -36,7 +36,7 @@ class RuntimeInstanceContainer(RuntimeContainer):
 
     def rebuild(self) -> RuntimeContainer:
         if self._builder_context is None:
-            raise RuntimeError("現在のコンテナインスタンスにビルド文脈（ContextBuilder）が登録されていません。")
+            raise RuntimeError("現在のコンテナインスタンスにビルド文脈(ContextBuilder)が登録されていません。")
         return self._builder_context.build()
 
     @typing.overload

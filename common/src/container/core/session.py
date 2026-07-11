@@ -69,7 +69,7 @@ class ResolutionSession:
         return self._container._instantiation_engine.apply_pipeline(instance, component_id)
 
     def register_resource(self, instance: object, /) -> None:
-        """実体化の過程で生成されたクローズ可能アセット（接続等）を、コンテナの終了スタックへ登録します。"""
+        """実体化の過程で生成されたクローズ可能アセット(接続等)を、コンテナの終了スタックへ登録します。"""
         self._container._register_resource(instance)
 
     def put_cached_instance(self, key: CacheKey, instance: object, /) -> None:
