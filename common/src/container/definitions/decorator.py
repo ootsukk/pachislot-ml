@@ -62,7 +62,7 @@ class MetaAttributes(Protocol):
 
 
 class MetadataAccessor:
-    """MRO（クラス継承）をバイパスし、当該クラス固有のメタデータのみを厳格に抽出する専用アクセサ。"""
+    """MRO(クラス継承)をバイパスし、当該クラス固有のメタデータのみを厳格に抽出する専用アクセサ。"""
 
     @classmethod
     def get_plugin_meta(cls, target: type[object], /) -> PluginMeta | None:
@@ -148,7 +148,12 @@ def dependency_module(
             except Exception:
                 return False
 
-        cls.__dependency_meta__ = DependencyModuleMeta(module_name, version, evaluator) # type: ignore
+        cls.__dependency_meta__ = DependencyModuleMeta( # type: ignore
+            module_name=module_name,
+            version=version,
+            check_satisfied_callback=evaluator,
+        )
+
         return cls
 
     return decorator
