@@ -1,25 +1,43 @@
 from __future__ import annotations
 
-# 物理的には core/ サブパッケージに隠蔽されたビルダーをインポート
+from container.common.exceptions import (
+    CircularDependencyError,
+    ComponentInstantiationError,
+    ContainerError,
+)
+from container.common.interfaces import (
+    Initializable,
+    InstancePostProcessor,
+    RuntimeContainer,
+)
 from container.core.builder import InstanceResolverBuilder
 from container.definitions.component import (
+    CollectionComponent,
     Component,
     InstanceComponent,
     PluginComponent,
-    CollectionComponent,
-    InstanceComponent,
+    PropertyComponent,
 )
-from container.common.interfaces import RuntimeContainer, InstancePostProcessor, Initializable
+from container.definitions.decorator import (
+    dependency_module,
+    plugin,
+    plugin_impl,
+)
 
-# 公開APIのみを厳格に管理
-__all__ = [
-    "RuntimeContainer",
-    "InstanceResolverBuilder",
-    "InstancePostProcessor",
+__all__: list[str] = [
+    "CircularDependencyError",
+    "CollectionComponent",
     "Component",
+    "ComponentInstantiationError",
+    "ContainerError",
     "Initializable",
     "InstanceComponent",
+    "InstancePostProcessor",
+    "InstanceResolverBuilder",
     "PluginComponent",
-    "CollectionComponent",
-    "InstanceComponent",
+    "PropertyComponent",
+    "RuntimeContainer",
+    "dependency_module",
+    "plugin",
+    "plugin_impl",
 ]
