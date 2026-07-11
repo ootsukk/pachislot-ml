@@ -37,7 +37,7 @@ class LogLevel(StrEnum):
 
     @property
     def int_value(self) -> int:
-        """StrEnumの文字列に対応する標準loggingモジュールの整数値レベル（int）を返却します。"""
+        """StrEnumの文字列に対応する標準loggingモジュールの整数値レベル(int)を返却します。"""
         return logging.getLevelNamesMapping().get(self.value, logging.INFO)
 
 

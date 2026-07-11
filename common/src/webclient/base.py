@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import dataclasses
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from webclient.plugin import plugin
 from webclient.types import HttpMethod
-from webclient.utility import extract_config_type
 
 # =====================================================================
 #  設定オブジェクト
@@ -35,7 +33,7 @@ class RedirectOptions:
 
 @dataclass(frozen=True)
 class MultipartPart:
-    """マルチパートリクエストを構成する、個々の独立したパート（要素）を表す不変データコンテナ"""
+    """マルチパートリクエストを構成する、個々の独立したパート(要素)を表す不変データコンテナ"""
 
     name: str
     value: bytes | str
@@ -45,12 +43,12 @@ class MultipartPart:
 
 
 # =====================================================================
-#  コア・データモデル ＆ インターフェース（Protocol）
+#  コア・データモデル & インターフェース(Protocol)
 # =====================================================================
 
 @dataclass(frozen=True)
 class ClientHttpRequest:
-    """不変（Immutable）なHTTPリクエストデータコンテナ"""
+    """不変(Immutable)なHTTPリクエストデータコンテナ"""
     method: HttpMethod | str
     url: str
     headers: Mapping[str, str] = field(default_factory=dict)
@@ -166,7 +164,7 @@ class FilteredExchangeFunction(ExchangeFunction):
 # =====================================================================
 
 class Configurable[T]:
-    """コンポーネント自身が、対応する設定（Config）の解決・抽出に責任を持つための抽象基底クラス。"""
+    """コンポーネント自身が、対応する設定(Config)の解決・抽出に責任を持つための抽象基底クラス。"""
 
     @classmethod
     def get_config_type(cls) -> type | None:

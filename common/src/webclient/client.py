@@ -46,7 +46,7 @@ class WebClient:
         self._config: WebClientConfig = config if config is not None else WebClientConfig()
 
         # =====================================================================
-        # ユーザーからの直接生成ルート（コアパーツが足りない場合）
+        # ユーザーからの直接生成ルート(コアパーツが足りない場合)
         # =====================================================================
         if connector is None or encoder is None or decoder is None:
             # その場でDIコンテナを起動し、環境から具象を全自動引き当て
@@ -59,7 +59,7 @@ class WebClient:
             self._context_attributes = []
             self._plugin_groups = list(self._config.plugin_groups)
 
-            # 設定オブジェクト側に記述されている初期値をドメインへ完全マウント（設定漏れの防止）
+            # 設定オブジェクト側に記述されている初期値をドメインへ完全マウント(設定漏れの防止)
             self._base_url = self._config.base_url
             self._api_version = self._config.api_version
             self._default_timeout = self._config.timeout
@@ -67,7 +67,7 @@ class WebClient:
             self._default_cookies = dict(self._config.default_cookies)
 
         # =====================================================================
-        # ビルダーからの精緻なインジェクションルート（パーツが揃っている場合）
+        # ビルダーからの精緻なインジェクションルート(パーツが揃っている場合)
         # =====================================================================
         else:
             self._connector = connector
@@ -84,14 +84,14 @@ class WebClient:
             self._default_headers = default_headers if default_headers is not None else {}
             self._default_cookies = default_cookies if default_cookies is not None else {}
 
-        # 共通の実行パイプライン（マトリョーシカチェーン）の動的組み立て
+        # 共通の実行パイプライン(マトリョーシカチェーン)の動的組み立て
         self._exchange_function = self._init_exchange_pipeline()
 
     def _init_exchange_pipeline(self) -> ExchangeFunction:
         """フィルター群とコネクターを逆順走査し、マトリョーシカ状にラップされた実行パイプラインを動的に組み立てます。"""
         pipeline_filters: list[ExchangeFilter] = []
 
-        # コンテキスト属性フィルターを最外周（先頭）へ配置する規約の執行
+        # コンテキスト属性フィルターを最外周(先頭)へ配置する規約の執行
         if self._context_attributes:
             from webclient.filters.context_attributes_filter import ContextAttributesFilter
 

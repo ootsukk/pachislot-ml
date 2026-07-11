@@ -43,7 +43,7 @@ class MultipartBodyBuilder:
         media_type: MediaType | str | None = None,
         headers: Mapping[str, str] | None = None,
     ) -> Self:
-        """明示的なファイル名（filename）を伴うファイルアップロード用パートを追加します。"""
+        """明示的なファイル名(filename)を伴うファイルアップロード用パートを追加します。"""
         self._parts.append(
             MultipartPart(
                 name=name,

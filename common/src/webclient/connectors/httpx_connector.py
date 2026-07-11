@@ -65,7 +65,7 @@ class HttpxClientHttpConnector(ClientHttpConnector, Configurable[HttpxConnectorO
 
 
     async def exchange(self, request: ClientHttpRequest, *, stream: bool = False) -> ClientHttpResponse:
-        """共通リクエストモデル（ClientHttpRequest）を HTTPX 固有の要求へ翻訳して送信します"""
+        """共通リクエストモデル(ClientHttpRequest)を HTTPX 固有の要求へ翻訳して送信します"""
 
         kwargs = self._build_request_kwargs(request)
 
@@ -98,7 +98,7 @@ class HttpxClientHttpConnector(ClientHttpConnector, Configurable[HttpxConnectorO
     def _build_mount_routing_map(
         self, transport_kwargs: dict[str, Any], direct_transport: httpx.AsyncHTTPTransport
     ) -> dict[str, httpx.AsyncHTTPTransport]:
-        """プロキシ、バイパス（no_proxy）を含む高度な URL ルーティングマップを構築します"""
+        """プロキシ、バイパス(no_proxy)を含む高度な URL ルーティングマップを構築します"""
         httpx_mounts: dict[str, httpx.AsyncHTTPTransport] = {}
         if not self.proxy_options:
             return httpx_mounts

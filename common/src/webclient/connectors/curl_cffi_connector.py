@@ -56,7 +56,7 @@ class CurlCffiClientHttpConnector(ClientHttpConnector, Configurable[CurlCffiConn
         )
 
     async def exchange(self, request: ClientHttpRequest, *, stream: bool = False) -> ClientHttpResponse:
-        """共通リクエストモデル（ClientHttpRequest）を curl_cffi 固有の引数へ翻訳して送信します"""
+        """共通リクエストモデル(ClientHttpRequest)を curl_cffi 固有の引数へ翻訳して送信します"""
 
         kwargs = self._build_request_kwargs(request, stream)
 
@@ -64,7 +64,7 @@ class CurlCffiClientHttpConnector(ClientHttpConnector, Configurable[CurlCffiConn
         if request.multipart_body:
             self._inject_multipart_payload(request.multipart_body, kwargs)
 
-        # 手動指定ファイルマップがある場合のマージ（互換性維持）
+        # 手動指定ファイルマップがある場合のマージ(互換性維持)
         if request.files is not None:
             self._merge_explicit_files(request.files, kwargs)
 
@@ -86,7 +86,7 @@ class CurlCffiClientHttpConnector(ClientHttpConnector, Configurable[CurlCffiConn
             curl_proxies["https"] = self._build_proxy_authenticated_url(self.proxy_options.https_url)
 
         if self.proxy_options.no_proxy:
-            # libcurl の NOPROXY 判定規則（CURLOPT_NOPROXY）はカンマ区切り文字列そのもの。
+            # libcurl の NOPROXY 判定規則(CURLOPT_NOPROXY)はカンマ区切り文字列そのもの。
             # HTTPXのようにホストごとにトランスポートを分離して再マウントする手続き型ハックは一切不要。
             # 除外設定文字列を流し込むだけで、libcurl カーネルが超高速に自動透過バイパスを執行します。
             curl_proxies["no_proxy"] = self.proxy_options.no_proxy
@@ -150,7 +150,7 @@ class CurlCffiClientHttpConnector(ClientHttpConnector, Configurable[CurlCffiConn
             kwargs_ref["files"] = curl_files
 
     def _merge_explicit_files(self, explicit_files: Mapping[str, Any], kwargs_ref: dict[str, Any]) -> None:
-        """手動指定された生ファイルマップ（request.files）を安全にマージして統合します"""
+        """手動指定された生ファイルマップ(request.files)を安全にマージして統合します"""
         existing_files = kwargs_ref.get("files", {})
         merged_files = dict(existing_files) if existing_files else {}
         merged_files.update(explicit_files)

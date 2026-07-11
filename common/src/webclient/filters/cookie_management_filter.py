@@ -16,7 +16,7 @@ from webclient.plugin import plugin_impl
 
 @dataclass(frozen=True)
 class CookieSessionOptions:
-    """状態維持（有状態セッション）を自動化するクッキー管理フィルター設定"""
+    """状態維持(有状態セッション)を自動化するクッキー管理フィルター設定"""
     order: int = 40
 
 @plugin_impl("cookie_management", priority=80)

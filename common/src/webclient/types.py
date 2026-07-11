@@ -44,7 +44,7 @@ class MediaType(StrEnum):
     SVG = "image/svg+xml"
 
     def with_charset(self, charset: str = CHARSET_UTF8) -> str:
-        """メディアタイプに文字コード属性（charset）を結合した文字列を返します。
+        """メディアタイプに文字コード属性(charset)を結合した文字列を返します。
 
         使用例: MediaType.JSON.with_charset() -> "application/json; charset=utf-8"
         """

@@ -15,7 +15,7 @@ from webclient.types import CHARSET_UTF8
 # TODO: Implement MsgspecBodyEncoder using msgspec.json.encode for ultra-fast request serialization.
 @plugin_impl("encoder")
 class DefaultBodyEncoder(BodyEncoder):
-    # Python標準ライブラリ（json, dataclasses）に準拠したデフォルトのエンコーダー
+    # Python標準ライブラリ(json, dataclasses)に準拠したデフォルトのエンコーダー
 
     def encode(self, body: object, /) -> object:
         if body is None or isinstance(body, bytes | str | int | float | bool):

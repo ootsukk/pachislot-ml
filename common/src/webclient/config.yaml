@@ -1,5 +1,13 @@
 webclient:
-  http_connector:
+  base_url: http://sample.com
+  timeout: 20.0
+  proxy: # dataclassを使用する
+    http_url: 120.0.0.1:80
+    username: test
+    password: test123
+  encoder: auto
+  decoder: auto
+  http_connector: # @dependency_moduleを使用する。depends_on(Encoder,Decoder)
     auto
   filters:
     context_attributes:
@@ -8,8 +16,11 @@ webclient:
       enabled: true
     retry:
       enabled: true
-      retry_options:
+      retry_options: # BaseModelを使用する
         max_attempts: 5
         backoff_factor: 0.5
     logging:
       enabled: true
+      format_type: simple # optionsを省略した場合
+      log_level: INFO
+  plugin_groups: [webclient.plugins] # entryポイントスキャンで利用する

@@ -6,7 +6,7 @@ import operator
 import re
 from typing import Any, overload
 
-# 仕様（インターフェース）の登録プール
+# 仕様(インターフェース)の登録プール
 _REGISTERED_SPECS: list[type[Any]] = []
 
 
@@ -30,7 +30,7 @@ class DependencyModuleMeta:
 
     def __init__(self, module_name: str, version: str, check_satisfied: Callable[[], bool]) -> None:
         self.module_name = module_name  # pipに登録されている実際のパッケージ名
-        self.version = version  # 要求するセマンティックバージョン条件（例: '>=0.5.0'）
+        self.version = version  # 要求するセマンティックバージョン条件(例: '>=0.5.0')
         self.check_satisfied = check_satisfied  # 遅延評価用のトリガー関数
 
 
@@ -47,7 +47,7 @@ def plugin(
     *,
     depends_on: type[Any] | Sequence[type[Any]] | None = None,
 ) -> Any:
-    """拡張仕様インターフェース（Protocol/ABC）に付与するドメインアノテーション"""
+    """拡張仕様インターフェース(Protocol/ABC)に付与するドメインアノテーション"""
 
     def decorator(cls: type[Any]) -> type[Any]:
         deps = [depends_on] if isinstance(depends_on, type) else list(depends_on or [])

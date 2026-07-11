@@ -38,11 +38,11 @@ def get_component_name(cls: type[Any]) -> str:
 
 
 def extract_config_type(cls: type[Any]) -> type[Any] | None:
-    """実装クラスが Configurable[T] を継承している場合、その型引数 T（設定クラスの型）をリフレクション抽出します"""
+    """実装クラスが Configurable[T] を継承している場合、その型引数 T(設定クラスの型)をリフレクション抽出します"""
     if hasattr(cls, "__orig_bases__"):
         for base in cls.__orig_bases__:
             origin = getattr(base, "__origin__", None)
-            # 💡 循環参照を100%防ぐため、型オブジェクトではなくクラス名（文字列）のメタ比較で安全に抽出を達成
+            # 💡 循環参照を100%防ぐため、型オブジェクトではなくクラス名(文字列)のメタ比較で安全に抽出を達成
             if origin and origin.__name__ == "Configurable":
                 args = getattr(base, "__args__", None)
                 if args and isinstance(args[0], type):

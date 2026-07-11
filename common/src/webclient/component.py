@@ -55,7 +55,7 @@ class NamingStrategy(ABC):
 
 
 class FixedKey(NamingStrategy):
-    """最優先責任：トップレベル用の固定明示キー戦略（例: 'encoder' や 'filters'）。"""
+    """最優先責任:トップレベル用の固定明示キー戦略(例: 'encoder' や 'filters')。"""
 
     def __init__(self, key: str, next_strategy: NamingStrategy | None = None) -> None:
         super().__init__(next_strategy)
@@ -73,7 +73,7 @@ class FixedKey(NamingStrategy):
 
 
 class PluginNameKey(NamingStrategy):
-    """第二責任：設定値、または実装クラスの @plugin_impl.value メタデータからの動的解決戦略。"""
+    """第二責任:設定値、または実装クラスの @plugin_impl.value メタデータからの動的解決戦略。"""
 
     def handle_get_key(self, cls_obj: type[Any] | None = None, dynamic_name: str | None = None) -> str | None:
         if dynamic_name and dynamic_name != "auto":
@@ -221,7 +221,7 @@ class PluginListComponent(Component):
         return self.nested_component.plugin_spec_type
 
 
-# カタログの一元集約：WebClientがデフォルトで解決すべき宇宙の構成要素の固定定義
+# カタログの一元集約:WebClientがデフォルトで解決すべき宇宙の構成要素の固定定義
 DEFAULT_COMPONENTS: list[Component] = [
     PropertyComponent(str, naming_chain("base_url"), mandatory=False),
     PropertyComponent(str, naming_chain("api_version"), mandatory=False),

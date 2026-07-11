@@ -189,7 +189,7 @@ class AssetResolver:
             if component.mandatory:
                 raise LookupError(
                     f"生存に必須な仕様 '{spec_type.__name__}' に対する "
-                    f"有効な実装プラグイン（指定名: '{plugin_name}'）が環境内に見つかりません。"
+                    f"有効な実装プラグイン(指定名: '{plugin_name}')が環境内に見つかりません。"
                 )
             return None
 

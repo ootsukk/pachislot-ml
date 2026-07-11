@@ -17,7 +17,7 @@ class ResponseSpec:
     """レスポンスデータを安全に管理・抽出するための流れるような(Fluent)レスポンス表現スペック。
 
     非同期コンテキストマネージャに対応しており、async with ブロックを抜ける際に
-    下位の通信コネクションやリソースを全自動で確実に解放（リークを物理遮断）します。
+    下位の通信コネクションやリソースを全自動で確実に解放(リークを物理遮断)します。
     """
 
     def __init__(self, response: ClientHttpResponse, decoder: BodyDecoder) -> None:
@@ -45,13 +45,13 @@ class ResponseSpec:
         return self._response.headers
 
     async def read_body(self) -> bytes:
-        """全データを生のバイト配列（bytes）として一括取得します。"""
+        """全データを生のバイト配列(bytes)として一括取得します。"""
         if self._is_closed:
             raise RuntimeError("クローズされたレスポンスからボディを読み取ることはできません。")
         return await self._response.read_body()
 
     async def value[T](self, element_type: type[T], /) -> T:
-        """全データをメモリに一括ロードし、指定された型（dataclassやdictなど）に全自動でデコードして返します。"""
+        """全データをメモリに一括ロードし、指定された型(dataclassやdictなど)に全自動でデコードして返します。"""
         if self._is_closed:
             raise RuntimeError("クローズされたレスポンスからデータを読み取ることはできません。")
         body_bytes = await self._response.read_body()
@@ -69,7 +69,7 @@ class ResponseSpec:
         return _gen()
 
     def stream_chunks(self, chunk_size: int = 4096) -> AsyncIterator[bytes]:
-        """大容量バイナリデータ（ZIPや動画等）をメモリを枯渇させないように一定サイズ（チャンク）ごとに切り出して流す非同期ジェネレータを返します。"""
+        """大容量バイナリデータ(ZIPや動画等)をメモリを枯渇させないように一定サイズ(チャンク)ごとに切り出して流す非同期ジェネレータを返します。"""
         if self._is_closed:
             raise RuntimeError("クローズされたレスポンスからストリームを開始することはできません。")
 
@@ -80,7 +80,7 @@ class ResponseSpec:
         return _gen()
 
     async def close(self) -> None:
-        """下位の通信レスポンスを安全にクローズし、リソースを解放します。このメソッドは何度呼び出しても安全です（べき等性担保）。"""
+        """下位の通信レスポンスを安全にクローズし、リソースを解放します。このメソッドは何度呼び出しても安全です(べき等性担保)。"""
         if not self._is_closed:
             await self._response.close()
             self._is_closed = True
@@ -131,7 +131,7 @@ class RequestHeadersSpec:
 
     def _clone(self, **updates: Any) -> Self:
         """自身の構成パラメータを引き継ぎつつ、指定された属性のみをオーバーライドした
-        全く新しい同型スペックオブジェクト（不変スナップショット）を新造して返します。
+        全く新しい同型スペックオブジェクト(不変スナップショット)を新造して返します。
         """
         kwargs = {
             "exchange_function": self._exchange_function,
@@ -260,7 +260,7 @@ class RequestHeadersSpec:
         return _stream_generator()
 
     def stream_chunks(self, chunk_size: int = 4096) -> AsyncIterator[bytes]:
-        """大容量バイナリ（ZIPやPDF等）をメモリを汚さずに一定サイズ（チャンク）ごとに切り出して
+        """大容量バイナリ(ZIPやPDF等)をメモリを汚さずに一定サイズ(チャンク)ごとに切り出して
         流し込む、完全自律クローズ型のストリーミングゲートウェイを返却します。
         """
         request = self._build_request()
@@ -314,7 +314,7 @@ class RequestHeadersSpec:
 
 
 class RequestBodySpec(RequestHeadersSpec):
-    """ボディ（JSON、Form、Multipart）のインジェクション能力を拡張した上位スペック境界。"""
+    """ボディ(JSON、Form、Multipart)のインジェクション能力を拡張した上位スペック境界。"""
 
     def body_value(self, body: object, /) -> RequestHeadersSpec:
         new_headers = dict(self._headers)
@@ -385,7 +385,7 @@ class RequestHeadersUriSpec:
 
 
 class RequestBodyUriSpec:
-    """ボディ積載が許可されたメソッド（POST, PUT等）専用のURIテンプレート解決スペック境界。"""
+    """ボディ積載が許可されたメソッド(POST, PUT等)専用のURIテンプレート解決スペック境界。"""
 
     def __init__(self, exchange_function: ExchangeFunction, encoder: BodyEncoder, decoder: BodyDecoder, method: HttpMethod, api_version: str, default_headers: Mapping[str, str], default_cookies: Mapping[str, str], default_timeout: float | object | None) -> None:
         self._exchange_function = exchange_function
