@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-import collections.abc
 import importlib.metadata
-import operator
 import re
 import threading
-from typing import Final, Protocol, overload
+from collections.abc import Callable, Mapping, Sequence
+from typing import Final, Protocol, cast, overload
 
 
 class PluginMeta:
     """拡張インタフェースクラスの不変メタデータ。"""
 
-    def __init__(self, *, depends_on: collections.abc.Sequence[type[object]]) -> None:
-        self.depends_on: Final[collections.abc.Sequence[type[object]]] = tuple(depends_on)
+    def __init__(self, *, depends_on: Sequence[type[object]]) -> None:
+        self.depends_on: Final[Sequence[type[object]]] = tuple(depends_on)
 
 
 class PluginImplMeta:
@@ -31,26 +30,23 @@ class DependencyModuleMeta:
         *,
         module_name: str,
         version: str,
-        check_satisfied_callback: collections.abc.Callable[[], bool],
+        check_satisfied_callback: Callable[[], bool],
     ) -> None:
         self.module_name: Final[str] = module_name
         self.version: Final[str] = version
-        self._check_satisfied_callback: Final[collections.abc.Callable[[], bool]] = check_satisfied_callback
+        self._check_satisfied_callback: Final[Callable[[], bool]] = check_satisfied_callback
         self._lock: Final[threading.Lock] = threading.Lock()
         self._cached_result: bool | None = None
 
     def check_satisfied(self) -> bool:
         """スレッド安全かつ冪等に外部モジュールの適合性を遅延評価します。"""
-        if self._cached_instance_resolved():
-            return self._cached_result  # type: ignore[return-value]
+        if (res := self._cached_result) is not None:
+            return res
 
         with self._lock:
             if self._cached_result is None:
                 self._cached_result = self._check_satisfied_callback()
             return self._cached_result
-
-    def _cached_instance_resolved(self) -> bool:
-        return self._cached_result is not None
 
 
 class MetaAttributes(Protocol):
@@ -58,7 +54,7 @@ class MetaAttributes(Protocol):
 
     __plugin_meta__: PluginMeta
     __plugin_impl_meta__: PluginImplMeta
-    __dependency_meta__ = DependencyModuleMeta
+    __dependency_meta__: DependencyModuleMeta
 
 
 class MetadataAccessor:
@@ -80,6 +76,12 @@ class MetadataAccessor:
         return meta if isinstance(meta, DependencyModuleMeta) else None
 
 
+class ClassDecorator(Protocol):
+    """対象クラスの型情報を完全に維持したままデコレートするための構造的プロトコル。"""
+
+    def __call__[T: type[object]](self, cls: T, /) -> T: ...
+
+
 @overload
 def plugin[T: type[object]](cls: T, /) -> T: ...
 
@@ -87,21 +89,21 @@ def plugin[T: type[object]](cls: T, /) -> T: ...
 @overload
 def plugin(
     *,
-    depends_on: type[object] | collections.abc.Sequence[type[object]] | None = None,
-) -> collections.abc.Callable[[type[object]], type[object]]: ...
+    depends_on: type[object] | Sequence[type[object]] | None = None,
+) -> ClassDecorator: ...
 
 
 def plugin(
     cls_obj: type[object] | None = None,
     /,
     *,
-    depends_on: type[object] | collections.abc.Sequence[type[object]] | None = None,
-) -> type[object] | collections.abc.Callable[[type[object]], type[object]]:
+    depends_on: type[object] | Sequence[type[object]] | None = None,
+) -> type[object] | ClassDecorator:
     """拡張仕様インターフェースに付与するドメインアノテーション。"""
 
-    def decorator(cls: type[object]) -> type[object]:
+    def decorator[T: type[object]](cls: T, /) -> T:
         deps = [depends_on] if isinstance(depends_on, type) else list(depends_on or [])
-        cls.__plugin_meta__ = PluginMeta(depends_on=deps) # type: ignore
+        cast(type[MetaAttributes], cls).__plugin_meta__ = PluginMeta(depends_on=deps)
         return cls
 
     if cls_obj is not None:
@@ -114,11 +116,11 @@ def plugin_impl(
     value: str,
     *,
     priority: int = 100,
-) -> collections.abc.Callable[[type[object]], type[object]]:
+) -> ClassDecorator:
     """拡張実装クラスに付与するデコレータ。"""
 
-    def decorator(cls: type[object]) -> type[object]:
-        cls.__plugin_impl_meta__ = PluginImplMeta(value=value, priority=priority) # type: ignore
+    def decorator[T: type[object]](cls: T, /) -> T:
+        cast(type[MetaAttributes], cls).__plugin_impl_meta__ = PluginImplMeta(value=value, priority=priority)
         return cls
 
     return decorator
@@ -127,10 +129,10 @@ def plugin_impl(
 def dependency_module(
     module_name: str,
     version: str,
-) -> collections.abc.Callable[[type[object]], type[object]]:
+) -> ClassDecorator:
     """拡張実装クラスが依存する外部ライブラリの情報を指定するデコレータ。"""
 
-    def decorator(cls: type[object]) -> type[object]:
+    def decorator[T: type[object]](cls: T, /) -> T:
         def evaluator() -> bool:
             try:
                 actual_version = importlib.metadata.version(module_name)
@@ -148,12 +150,11 @@ def dependency_module(
             except Exception:
                 return False
 
-        cls.__dependency_meta__ = DependencyModuleMeta( # type: ignore
+        cast(type[MetaAttributes], cls).__dependency_meta__ = DependencyModuleMeta(
             module_name=module_name,
             version=version,
             check_satisfied_callback=evaluator,
         )
-
         return cls
 
     return decorator
@@ -162,12 +163,17 @@ def dependency_module(
 class VersionConstraint:
     """セマンティックバージョンの条件式を自律判定する値オブジェクト。"""
 
-    _OPERATORS: Final[dict[str, collections.abc.Callable[[list[int], list[int]], bool]]] = {
-        "==": operator.eq,
-        ">=": operator.ge,
-        "<=": operator.le,
-        ">": operator.gt,
-        "<": operator.lt,
+    _OPERATORS: Final[
+        Mapping[
+            str,
+            Callable[[Sequence[int], Sequence[int]], bool],
+        ]
+    ] = {
+        "==": lambda a, b: tuple(a) == tuple(b),
+        ">=": lambda a, b: tuple(a) >= tuple(b),
+        "<=": lambda a, b: tuple(a) <= tuple(b),
+        ">": lambda a, b: tuple(a) > tuple(b),
+        "<": lambda a, b: tuple(a) < tuple(b),
     }
 
     def __init__(self, constraint_expr: str, /) -> None:
@@ -185,7 +191,7 @@ class VersionConstraint:
 
         self._op_str: Final[str] = op_str
         self._required_str: Final[str] = required_str
-        self._required_parts: Final[list[int]] = required_parts
+        self._required_parts: Final[Sequence[int]] = required_parts
 
     def is_satisfied_by(self, actual_version: str, /) -> bool:
         if not self._required_parts:
@@ -194,8 +200,8 @@ class VersionConstraint:
         actual_parts = [int(x) for x in re.findall(r"\d+", actual_version)]
         max_len = max(len(actual_parts), len(self._required_parts))
 
-        actual_parts += [0] * (max_len - len(actual_parts))
-        required_parts = self._required_parts + [0] * (max_len - len(self._required_parts))
+        actual_parts_list = list(actual_parts) + [0] * (max_len - len(actual_parts))
+        required_parts_list = list(self._required_parts) + [0] * (max_len - len(self._required_parts))
 
         comp_func = self._OPERATORS.get(self._op_str)
-        return comp_func(actual_parts, required_parts) if comp_func else False
+        return comp_func(actual_parts_list, required_parts_list) if comp_func else False
