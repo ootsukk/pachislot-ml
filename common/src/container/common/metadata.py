@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import contextlib
 import types
 from collections.abc import Iterator
@@ -5,7 +7,6 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Final
 
-from container.common.interfaces import ScopeStrategy
 from container.definitions.component import Component
 
 
@@ -60,7 +61,7 @@ class StripedLock:
         return self._locks[hash(key) % self._buckets]
 
 
-class SingletonScopeStrategy(ScopeStrategy):
+class SingletonScopeStrategy:
     """グローバルシングルトンの生存期間を統治する、スレッド安全で低競合な標準スコープ実装。"""
 
     def __init__(self, bucket_count: int = 16, /) -> None:
