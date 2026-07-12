@@ -4,13 +4,63 @@ import argparse
 import fnmatch
 import shutil
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 # Global configuration constants
-DEFAULT_SOURCE: Final[str] = "E:/MyDocument/work/vscode/python/pachislot-ml/common/src/tools"
+DEFAULT_ROOT_DIR: Final[str] = "E:/MyDocument/work/vscode/python/pachislot-ml"
+DEFAULT_SOURCE: Final[str] = "E:/MyDocument/work/vscode/python/pachislot-ml/common/src/container"
 DEFAULT_DESTINATION: Final[str] = "H:/マイドライブ/python"
+
+
+@dataclass(frozen=True, slots=True)
+class GitignorePattern:
+    """Immutable Value Object representing a single gitignore pattern rule."""
+
+    raw_pattern: str
+    cleaned_pattern: str
+    is_dir_only: bool
+
+    def matches(self, relative_path: Path, /) -> bool:
+        """Evaluate if the given relative path matches this pattern constraint directly via an inlined condition."""
+        path_str = relative_path.as_posix()
+
+        # Inlined conditional evaluation optimizing short-circuit mechanics
+        return (
+            any(fnmatch.fnmatch(part, self.cleaned_pattern) for part in relative_path.parts)
+            or fnmatch.fnmatch(path_str, self.raw_pattern)
+            or fnmatch.fnmatch(path_str, self.cleaned_pattern)
+            or (self.is_dir_only and path_str.startswith(self.cleaned_pattern + "/"))
+        )
+
+
+# Encapsulate system-wide implicit exclusion rules as standard domain data
+SYSTEM_DEFAULT_PATTERNS: Final[Sequence[GitignorePattern]] = (
+    GitignorePattern(raw_pattern="__pycache__/", cleaned_pattern="__pycache__", is_dir_only=True),
+    GitignorePattern(raw_pattern=".git/", cleaned_pattern=".git", is_dir_only=True),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class GitignoreMatcher:
+    """First-Class Collection that encapsulates a group of GitignorePatterns."""
+
+    patterns: Sequence[GitignorePattern]
+
+    def should_exclude(self, path: Path, base_dir: Path, /) -> bool:
+        """Determine if a concrete path matches any internal domain patterns via data-driven execution."""
+        try:
+            relative_path = path.relative_to(base_dir)
+        except ValueError:
+            return False
+
+        return any(pattern.matches(relative_path) for pattern in self.patterns)
+
+    def merge(self, other: GitignoreMatcher, /) -> GitignoreMatcher:
+        """Merge two matchers into a new combined immutable GitignoreMatcher."""
+        return GitignoreMatcher((*self.patterns, *other.patterns))
 
 
 def main() -> None:
@@ -18,24 +68,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Recursively copy a directory including itself while respecting .gitignore rules."
     )
-    parser.add_argument(
-        "-src", "--source", type=str, default=DEFAULT_SOURCE, help="Source directory path (default: %(default)s)"
-    )
-    parser.add_argument(
-        "-dest",
-        "--destination",
-        type=str,
-        default=DEFAULT_DESTINATION,
-        help="Destination directory path (default: %(default)s)",
-    )
-    parser.add_argument("-f", "--force", action="store_true", help="Force copy without user confirmation")
+    parser.add_argument("-root", "--root-dir", type=str, default=DEFAULT_ROOT_DIR)
+    parser.add_argument("-src", "--source", type=str, default=DEFAULT_SOURCE)
+    parser.add_argument("-dest", "--destination", type=str, default=DEFAULT_DESTINATION)
+    parser.add_argument("-f", "--force", action="store_true")
     args = parser.parse_args()
 
+    root = Path(args.root_dir)
     src = Path(args.source)
     dst = Path(args.destination)
 
-    print(f"Source:      {src.resolve()}")
-    print(f"Destination: {dst.resolve()}")
+    print(f"Project Root: {root.resolve()}")
+    print(f"Source:       {src.resolve()}")
+    print(f"Destination:  {dst.resolve()}")
 
     if not args.force:
         try:
@@ -49,94 +94,84 @@ def main() -> None:
             sys.exit(0)
 
     try:
-        copy_with_gitignore(src, dst)
+        copy_with_gitignore(src, dst, root_dir=root)
         print("Copy operation completed successfully.")
-    except ValueError as e:
-        print(f"Validation Error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except PermissionError as e:
-        print(f"Permission Error: {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 
-def parse_gitignore(gitignore_path: Path, /) -> Sequence[str]:
-    """Parse a .gitignore file and extract valid patterns."""
+def parse_gitignore(gitignore_path: Path, /) -> GitignoreMatcher:
+    """Parse a single .gitignore file and return a structured GitignoreMatcher instance."""
+    patterns: list[GitignorePattern] = []
+
     if not gitignore_path.is_file():
-        return []
+        return GitignoreMatcher(patterns)
 
-    patterns: list[str] = []
     with gitignore_path.open(mode="r", encoding="utf-8") as f:
         for line in f:
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
-            patterns.append(stripped)
-    return patterns
+
+            is_dir_only = stripped.endswith("/")
+            cleaned = stripped.strip("/")
+            patterns.append(
+                GitignorePattern(
+                    raw_pattern=stripped,
+                    cleaned_pattern=cleaned,
+                    is_dir_only=is_dir_only,
+                )
+            )
+    return GitignoreMatcher(patterns)
 
 
-def should_exclude(path: Path, base_dir: Path, patterns: Sequence[str], /) -> bool:
-    """Determine if a given path matches any gitignore patterns."""
-    try:
-        relative_path = path.relative_to(base_dir)
-    except ValueError:
-        return False
+def create_ignore_callback(
+    base_dir: Path, global_matcher: GitignoreMatcher, /
+) -> Callable[[str, list[str]], Sequence[str]]:
+    """Create a high-order function compliant with shutil.copytree ignore protocol."""
 
-    path_str = relative_path.as_posix()
+    def _ignore(current_dir_str: str, names: list[str]) -> list[str]:
+        current_dir = Path(current_dir_str)
+        ignored_names: list[str] = []
 
-    for pattern in patterns:
-        if pattern.endswith("/"):
-            clean_pattern = pattern.rstrip("/")
-            if any(fnmatch.fnmatch(part, clean_pattern) for part in relative_path.parts):
-                return True
-        if fnmatch.fnmatch(path_str, pattern) or any(fnmatch.fnmatch(part, pattern) for part in relative_path.parts):
-            return True
+        local_gitignore = current_dir / ".gitignore"
+        active_matcher = global_matcher
+        if local_gitignore.is_file():
+            active_matcher = global_matcher.merge(parse_gitignore(local_gitignore))
 
-    return False
+        for name in names:
+            path = current_dir / name
+            if active_matcher.should_exclude(path, base_dir):
+                ignored_names.append(name)
+
+        return ignored_names
+
+    return _ignore
 
 
-def copy_with_gitignore(src_dir: Path, dst_dir: Path, /) -> None:
+def copy_with_gitignore(src_dir: Path, dst_dir: Path, /, *, root_dir: Path = Path(DEFAULT_ROOT_DIR)) -> None:
     """Validate directories and recursively copy the source directory itself into the destination."""
     if not src_dir.is_dir():
         raise ValueError("Source path must be a directory")
 
     src_resolved = src_dir.resolve()
     dst_resolved = dst_dir.resolve()
+    root_resolved = root_dir.resolve()
 
-    if src_resolved == dst_resolved:
-        raise ValueError("Source and destination directories cannot be identical")
+    if src_resolved == dst_resolved or dst_resolved.is_relative_to(src_resolved):
+        raise ValueError("Invalid directory configuration")
 
-    if dst_resolved.is_relative_to(src_resolved):
-        raise ValueError("Destination directory cannot be a subdirectory of the source directory")
-
-    # Define the target base directory inside the destination [Effective Python Item 24]
     target_base_dir = dst_resolved / src_resolved.name
-    target_base_dir.mkdir(parents=True, exist_ok=True)
 
-    global_patterns = parse_gitignore(src_resolved / ".gitignore")
+    system_matcher = GitignoreMatcher(SYSTEM_DEFAULT_PATTERNS)
+    root_matcher = parse_gitignore(root_resolved / ".gitignore")
+    src_matcher = parse_gitignore(src_resolved / ".gitignore")
 
-    for path in src_resolved.rglob("*"):
-        if path == dst_resolved or path.is_relative_to(dst_resolved):
-            continue
+    global_matcher = system_matcher.merge(root_matcher).merge(src_matcher)
+    ignore_callback = create_ignore_callback(src_resolved, global_matcher)
 
-        current_dir = path.parent if path.is_file() else path
-        local_gitignore = current_dir / ".gitignore"
-
-        active_patterns = list(global_patterns)
-        if local_gitignore.is_file():
-            active_patterns.extend(parse_gitignore(local_gitignore))
-
-        if should_exclude(path, src_resolved, active_patterns):
-            continue
-
-        # Calculate the destination path relative to the new target base directory
-        relative_path = path.relative_to(src_resolved)
-        target_path = target_base_dir / relative_path
-
-        if path.is_dir():
-            target_path.mkdir(parents=True, exist_ok=True)
-        elif path.is_file():
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target_path)
+    shutil.copytree(src_resolved, target_base_dir, ignore=ignore_callback, dirs_exist_ok=True, symlinks=False)
 
 
 if __name__ == "__main__":
