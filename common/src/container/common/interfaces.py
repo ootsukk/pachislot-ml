@@ -25,6 +25,11 @@ class Closable(Protocol):
     def close(self) -> None: ...
 
 
+@runtime_checkable
+class AsyncClosable(Protocol):
+    async def close(self) -> None: ...
+
+
 class RuntimeContainer(Protocol):
     """コンテナ内アセットに対する読み取り専用の最上位抽象境界インターフェース。"""
 

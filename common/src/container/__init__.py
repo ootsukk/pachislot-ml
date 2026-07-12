@@ -11,6 +11,7 @@ from container.common.interfaces import (
     RuntimeContainer,
 )
 from container.core.builder import InstanceResolverBuilder
+from container.core.facade import ContainerFacade
 from container.definitions.component import (
     CollectionComponent,
     Component,
@@ -30,6 +31,7 @@ __all__: list[str] = [
     "Component",
     "ComponentInstantiationError",
     "ContainerError",
+    "ContainerFacade",
     "Initializable",
     "InstanceComponent",
     "InstancePostProcessor",

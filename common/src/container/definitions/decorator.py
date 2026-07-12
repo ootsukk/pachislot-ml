@@ -10,16 +10,23 @@ from typing import Final, Protocol, cast, overload
 class PluginMeta:
     """拡張インタフェースクラスの不変メタデータ。"""
 
-    def __init__(self, *, depends_on: Sequence[type[object]]) -> None:
-        self.depends_on: Final[Sequence[type[object]]] = tuple(depends_on)
+    def __init__(self) -> None:
+        pass
 
 
 class PluginImplMeta:
     """拡張実装クラスの不変メタデータ。"""
 
-    def __init__(self, *, value: str, priority: int) -> None:
+    def __init__(
+        self,
+        *,
+        value: str,
+        priority: int,
+        depends_on: Sequence[type[object]],
+    ) -> None:
         self.value: Final[str] = value
         self.priority: Final[int] = priority
+        self.depends_on: Final[Sequence[type[object]]] = tuple(depends_on)
 
 
 class DependencyModuleMeta:
@@ -87,23 +94,17 @@ def plugin[T: type[object]](cls: T, /) -> T: ...
 
 
 @overload
-def plugin(
-    *,
-    depends_on: type[object] | Sequence[type[object]] | None = None,
-) -> ClassDecorator: ...
+def plugin() -> ClassDecorator: ...
 
 
 def plugin(
     cls_obj: type[object] | None = None,
     /,
-    *,
-    depends_on: type[object] | Sequence[type[object]] | None = None,
 ) -> type[object] | ClassDecorator:
     """拡張仕様インターフェースに付与するドメインアノテーション。"""
 
     def decorator[T: type[object]](cls: T, /) -> T:
-        deps = [depends_on] if isinstance(depends_on, type) else list(depends_on or [])
-        cast(type[MetaAttributes], cls).__plugin_meta__ = PluginMeta(depends_on=deps)
+        cast(type[MetaAttributes], cls).__plugin_meta__ = PluginMeta()
         return cls
 
     if cls_obj is not None:
@@ -116,11 +117,17 @@ def plugin_impl(
     value: str,
     *,
     priority: int = 100,
+    depends_on: type[object] | Sequence[type[object]] | None = None,
 ) -> ClassDecorator:
     """拡張実装クラスに付与するデコレータ。"""
 
     def decorator[T: type[object]](cls: T, /) -> T:
-        cast(type[MetaAttributes], cls).__plugin_impl_meta__ = PluginImplMeta(value=value, priority=priority)
+        deps = [depends_on] if isinstance(depends_on, type) else list(depends_on or [])
+        cast(type[MetaAttributes], cls).__plugin_impl_meta__ = PluginImplMeta(
+            value=value,
+            priority=priority,
+            depends_on=deps,
+        )
         return cls
 
     return decorator
@@ -146,8 +153,6 @@ def dependency_module(
                         "-", "_"
                     ) and VersionConstraint(version).is_satisfied_by(dist.version):
                         return True
-                return False
-            except Exception:
                 return False
 
         cast(type[MetaAttributes], cls).__dependency_meta__ = DependencyModuleMeta(

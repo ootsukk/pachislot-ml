@@ -4,11 +4,11 @@ import contextlib
 import types
 import typing
 from collections.abc import Callable, Sequence
-from typing import Final, cast
+from typing import Final, Self, cast
 
 from container.common.constants import ComponentScope
 from container.common.exceptions import ComponentInstantiationError
-from container.common.interfaces import Closable, ContextBuilder, RuntimeContainer, ScopeStrategy
+from container.common.interfaces import AsyncClosable, Closable, ContextBuilder, RuntimeContainer, ScopeStrategy
 from container.common.metadata import CacheKey
 from container.core.engine import ComponentInstantiationEngine
 from container.core.session import ResolutionSession
@@ -32,7 +32,8 @@ class RuntimeInstanceContainer(RuntimeContainer):
         self._scope: Final[ScopeStrategy] = scope_strategy
         self._instantiation_engine: Final[ComponentInstantiationEngine] = instantiation_engine
         self._builder_context: Final[ContextBuilder] = builder_context
-        self._exit_stack: Final[contextlib.ExitStack] = contextlib.ExitStack()
+        self._exit_stack: Final[contextlib.AsyncExitStack] = contextlib.AsyncExitStack()
+        self._registered_resource_ids: Final[set[int]] = set()
 
     def rebuild(self) -> RuntimeContainer:
         if self._builder_context is None:
@@ -135,7 +136,7 @@ class RuntimeInstanceContainer(RuntimeContainer):
                 return self.contains_instance(item, name=None)
 
     def _create_cache_context(
-        self, resolvable: ResolvableType[typing.Any], name: str | None, /
+        self, resolvable: ResolvableType[object], name: str | None, /
     ) -> tuple[str | None, CacheKey]:
         actual_type = resolvable.raw_type
         if isinstance(actual_type, types.GenericAlias):
@@ -180,6 +181,10 @@ class RuntimeInstanceContainer(RuntimeContainer):
                 return dynamic_collection
 
             result = session.execute_with_lock(cache_key, factory_action)
+
+            if result is not None:
+                self._register_resource(result)
+
             return cast(T, result)
 
         if component is None:
@@ -199,12 +204,37 @@ class RuntimeInstanceContainer(RuntimeContainer):
             CacheKey(component.target_type, adjusted_name),
             session,
         )
+
+        if result is not None:
+            self._register_resource(result)
+
         return cast(T, result)
 
     def _register_resource(self, instance: object, /) -> None:
-        if isinstance(instance, Closable):
-            self._exit_stack.callback(instance.close)
+        instance_id = id(instance)
+        if instance_id in self._registered_resource_ids:
+            return
 
-    def close(self) -> None:
+        if isinstance(instance, AsyncClosable):
+            self._exit_stack.push_async_callback(instance.close)
+            self._registered_resource_ids.add(instance_id)
+        elif isinstance(instance, Closable):
+            self._exit_stack.callback(instance.close)
+            self._registered_resource_ids.add(instance_id)
+
+    async def close(self) -> None:
         self._scope.clear()
-        self._exit_stack.close()
+        await self._exit_stack.aclose()
+        self._registered_resource_ids.clear()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: types.TracebackType | None,
+        /,
+    ) -> None:
+        await self.close()

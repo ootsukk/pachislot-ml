@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import inspect
 import types
 import typing
@@ -15,7 +17,7 @@ class ResolvableType[T]:
 
     @classmethod
     def from_annotation(cls, annotation: object, /) -> ResolvableType[object] | None:
-        """型アノテーションからUnion型およびOptional性を解体抽出し、適切な状態を持つ不変インスタンスを鋳造します。"""
+        """型AnnotationからUnion型およびOptional性を解体抽出し、適切な状態を持つ不変インスタンスを鋳造します。"""
         if annotation is inspect.Parameter.empty:
             return None
 
